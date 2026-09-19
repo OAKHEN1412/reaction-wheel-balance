@@ -66,7 +66,15 @@ bool isFresh() {
   interrupts();
 
   if (period == 0) return false;
-  return (uint32_t)(nowMicros - lastPulse) <= kTimeoutUs;
+  // FG drops out at high wheel speed (hardware 2026-09-20: estimate fell from
+  // -450 to -4 rpm while the wheel was still spinning, turning the voltage
+  // command into a brake). Once no pulse has come for 4x the last period
+  // (min 15 ms) the magnitude is not trusted and WheelSpeedEstimator falls
+  // back to its applied-duty model.
+  uint32_t sinceLast = nowMicros - lastPulse;
+  uint32_t staleUs = period * 4UL;
+  if (staleUs < 15000UL) staleUs = 15000UL;
+  return sinceLast <= staleUs && sinceLast <= kTimeoutUs;
 }
 
 uint32_t getPulseCount() {

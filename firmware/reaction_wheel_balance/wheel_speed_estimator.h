@@ -17,9 +17,8 @@
 // motor torque):
 //   omega_est += (omega_cmd - omega_est) * dt / tau
 // sign(omega_est) is then a trustworthy (lagged, but not falsely flipped)
-// sign. The FG's own magnitude is used when it has a fresh reading (more
-// accurate than the model's magnitude); otherwise the model's magnitude is
-// used as a fallback (e.g. very low speed where FG pulses are sparse).
+// sign. Fresh FG readings correct the model's magnitude (gated against
+// outliers, see update()); without FG the model runs open-loop.
 // =============================================================================
 #include <math.h>
 
@@ -28,7 +27,7 @@ public:
   explicit WheelSpeedEstimator(float tauS = 0.08f) : tau_(tauS), omegaEst_(0.0f) {}
 
   void setTau(float tauS) { tau_ = tauS; }
-  void reset(float omega = 0.0f) { omegaEst_ = omega; }
+  void reset(float omega = 0.0f) { omegaEst_ = omega; disagreeS_ = 0.0f; }
 
   // omegaCmd: rad/s, the wheel speed currently being commanded (drives the lag).
   // fgMagnitude: rad/s, unsigned magnitude from the FG tach.
@@ -41,16 +40,38 @@ public:
     } else {
       omegaEst_ = omegaCmd;
     }
-    float sign = (omegaEst_ >= 0.0f) ? 1.0f : -1.0f;
-    float mag = fgFresh ? fgMagnitude : fabsf(omegaEst_);
-    return sign * mag;
+    // FG corrects the model's magnitude instead of replacing it. On hardware
+    // (2026-09-20) FG read -436, -215, -429, -178, -21 rpm within ~100 ms at
+    // full duty (missed pulses), and using it raw turned the voltage command
+    // into a brake. Readings far from the model are ignored unless they
+    // persist for kResyncS, so a real model error still gets corrected.
+    if (fgFresh) {
+      float sign = (omegaEst_ >= 0.0f) ? 1.0f : -1.0f;
+      float m = fabsf(omegaEst_);
+      float err = fgMagnitude - m;
+      float gate = fmaxf(kGateMinRadS, kGateFrac * m);
+      bool inGate = fabsf(err) <= gate;
+      // Once a disagreement has persisted, keep accepting until back in gate.
+      if (inGate || disagreeS_ >= kResyncS) {
+        float g = dt / kCorrTauS;
+        if (g > 1.0f) g = 1.0f;
+        omegaEst_ += sign * err * g;
+      }
+      disagreeS_ = inGate ? 0.0f : disagreeS_ + dt;
+    }
+    return omegaEst_;
   }
+  static constexpr float kCorrTauS = 0.03f;    // FG correction time constant
+  static constexpr float kGateMinRadS = 15.0f; // ~140 wheel rpm
+  static constexpr float kGateFrac = 0.35f;
+  static constexpr float kResyncS = 0.10f;
 
   float raw() const { return omegaEst_; }
 
 private:
   float tau_;
   float omegaEst_;
+  float disagreeS_ = 0.0f;
 };
 
 // ---------------------------------------------------------------------------
@@ -76,6 +97,19 @@ inline bool wheelSpeedEstimatorSelfTest(const char **failMsg = nullptr) {
   float last = 0.0f;
   for (int i = 0; i < 200; ++i) last = est.update(-100.0f, 100.0f, false, dt);
   if (!(last < 0.0f)) return fail("estimated sign failed to eventually track a sustained new command");
+
+  // FG consistent with the model pulls the magnitude toward it.
+  WheelSpeedEstimator e2(0.18f);
+  e2.reset(50.0f);
+  float v = 0.0f;
+  for (int i = 0; i < 50; ++i) v = e2.update(50.0f, 55.0f, true, 0.002f);
+  if (!(v > 53.0f && v < 56.0f)) return fail("consistent FG did not correct the model magnitude");
+  // A single wild FG reading (missed pulses) is ignored.
+  v = e2.update(50.0f, 2.0f, true, 0.002f);
+  if (!(v > 50.0f)) return fail("outlier FG reading was not rejected");
+  // A persistent disagreement is eventually accepted (resync).
+  for (int i = 0; i < 100; ++i) v = e2.update(v, 20.0f, true, 0.002f);
+  if (!(v < 30.0f)) return fail("persistent FG disagreement never resynced");
 
   return true;
 }

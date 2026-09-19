@@ -28,6 +28,13 @@ public:
     return angle_;
   }
 
+  // Gyro-only propagation, for steps where the accelerometer is not measuring
+  // gravity (impacts, jump kicks) and its atan2 angle would be garbage.
+  float updateGyroOnly(float gyroRate, float dt) {
+    angle_ += gyroRate * dt;
+    return angle_;
+  }
+
 private:
   float alpha_;
   float angle_;
@@ -38,4 +45,12 @@ private:
 // +1 g and num close to 0 g.
 inline float accelTiltAngle(float num, float den) {
   return atan2f(num, den);
+}
+
+// True if the accelerometer vector magnitude (g) is close enough to 1 g to be
+// trusted as a gravity reference. Added 2026-09-19: the jump kick jolted the
+// filtered angle by ~10 deg (read +0.6 deg while the frame was near -9 deg).
+inline bool accelLooksLikeGravity(float ax, float ay, float az, float tolG) {
+  float mag = sqrtf(ax * ax + ay * ay + az * az);
+  return fabsf(mag - 1.0f) <= tolG;
 }

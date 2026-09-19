@@ -125,7 +125,7 @@ MPU-6050 ติดตั้งในทิศทางที่ยังไม�
 | `save` | บันทึกเกน + offset ลง EEPROM |
 | `start` | เปิดการทรงตัว (ต้อง hold ตั้งตรงใหม่ตาม state machine) |
 | `stop` | ปิดการทรงตัว, เบรก+ปล่อยมอเตอร์ทันที |
-| `jump` | สั่งโหมดทดลอง JUMP_UP (ต้องเปิด `ENABLE_JUMP_UP` ใน config.h ก่อน) |
+| `jump [spin_rpm] [kick_ms]` / `jumpcfg` | Manual guarded jump / print jump parameters; see procedure below |
 | `tel 0|1` | เปิด/ปิด telemetry CSV (ไม่ใส่ argument = สลับค่า) |
 | `selftest` | รันชุดทดสอบ control law + wheel-speed estimator แบบ pure-logic |
 | `get` | พิมพ์เกน/สถานะปัจจุบัน + จำนวน loop overrun |
@@ -203,10 +203,8 @@ CALIBRATING -> WAIT_UPRIGHT -> BALANCING <-> FALLEN
 - **BALANCING**: รัน control law ตามด้านบน ถ้า |theta| > 20° ถือว่าล้ม -> FALLEN
 - **FALLEN**: เบรกสั้น ๆ แล้วปล่อย (coast), reset integrator, รอ hold ตั้งตรงใหม่
   แล้วกลับไป WAIT_UPRIGHT (ไม่ข้ามตรงไป BALANCING เลย)
-- **JUMP_UP** (ทดลอง, ปิดโดย default): ปั่นล้อขึ้นความเร็วที่ตั้งไว้ แล้วเบรกกะทันหัน
-  ให้โมเมนตัมที่สะสมส่งให้โครงเงยขึ้น จากนั้นถ้า |theta| < 15° หลังเบรก จะส่งต่อให้
-  BALANCING ทันที **โหมดนี้พึ่งพากลไก/แรงเสียดทานของโครงจริงมาก อาจไม่ทำงานเลย
-  หรือทำให้โครงกระแทกแรงได้ ต้องเข้าใจความเสี่ยงก่อนเปิดใช้**
+- **JUMP_UP**: manual voltage spin-up and reverse-voltage kick; see the procedure below.
+  Never starts automatically. Captures into BALANCING below 10?; timeout/fault goes to FALLEN.
 
 ## Safety
 
@@ -231,6 +229,63 @@ CALIBRATING -> WAIT_UPRIGHT -> BALANCING <-> FALLEN
 
 ## หมายเหตุค่า gain ตั้งต้น
 
-`DEFAULT_KP/KD/KW/KI` ใน `config.h` เป็น **placeholder = 0 ทั้งหมด** รอค่าจากงาน
-simulation (Python, ทำโดยทีมอื่นแบบขนาน) มาใส่ก่อนเริ่มจูนบนฮาร์ดแวร์จริง ห้ามเชื่อ
-ค่าตั้งต้นเหล่านี้ว่าทรงตัวได้
+Current defaults are Kp=1137.4, Kd=500, Kw=1.0, Ki=0.0387 (hardware-tuned
+2026-09-19). Saved EEPROM settings still override defaults; verify with `get`.
+
+## Manual jump test (2026-09-19)
+
+`ENABLE_JUMP_UP=true` enables only the guarded serial command. Existing balance
+gains, EEPROM layout, pins, IMU axes, FG filter and voltage law are unchanged.
+Do not change the saved working gains for this experiment: verify `get` shows
+Kp 1137.4, Kd 500, Kw 1.0, Ki 0.0387, sign +1, with the existing upright zero.
+
+1. Put a hand guard on the **opposite side of the frame** to catch overshoot;
+   keep hands/clothing away from the rotating wheel and pinch points. Keep power
+   isolation accessible. BRAKE is weak; neither `stop` nor a timeout instantly
+   removes the wheel's stored energy. Turn off 12 V before reset/flashing (inverted PWM).
+2. Send `stop`, then `jumpcfg` and `get`. Rest the frame on its stop (~+/-16 deg),
+   wheel stopped. Wait at least 500 ms. `tel 1` keeps the existing CSV columns:
+   `ms,state,theta_deg,theta_dot_dps,wheel_rpm,cmd_rpm,duty`.
+3. Send **`jump`** or **`jump 100 20`** for the first under-powered trial.
+   Defaults are 100 **wheel** rpm, 20 ms kick limit, 10 deg capture. From +theta,
+   spin-up drives negative, kick drives positive; -theta mirrors both signs.
+   Expect only ~1 deg rise nominally, at most ~2.6 deg in the tested fixed-tau inertia
+   range, then return. Driver dead time may yield no visible rise.
+4. Review the direction, motion and FG trace before increasing energy. The
+   simulation's expected working candidate is **`jump 200 350`**, still 10 deg
+   capture. At nominal inertia, nominal/half plugging with 0/20/50 ms delay and
+   ideal/FG-loss feedback passed; upright in ~1.35-1.51 s with ~0.8-1.8 deg overshoot.
+   The kick ends as soon as capture occurs (typically 84-198 ms), not at a fixed
+   350 ms. This is a conditional prediction, not hardware validation. Do not
+   jump directly to 550 rpm or infer that more RPM must improve capture.
+5. `stop` cancels immediately. A failed jump disables further drive until a new
+   explicit `jump` or `start`; it never retries by itself. Let the wheel stop
+   and restore the resting gate before another attempt. `start` retains its
+   existing normal upright-hold balancing procedure.
+
+`jump [spin_rpm] [kick_ms]` uses config defaults for omitted arguments on every
+invocation. Spin must be finite, positive and **<=550 wheel rpm**; kick must be
+an integer 1-500 ms. Invalid/extra arguments are rejected, not silently converted.
+`jumpcfg` prints the last accepted pair, defaults, capture and limits; it is not
+a setter and nothing is saved to EEPROM. Capture is `JUMP_CAPTURE_DEG` in config.h.
+
+Entry requires WAIT_UPRIGHT/FALLEN, healthy IMU sampled within 20 ms, sign +1,
+|theta|=10-22 deg, |rate|<=3 deg/s, wheel estimate and FG <=10 rpm, and angle drift
+<=1 deg continuously for 500 ms. Jump spin-up requires at least three new physical
+FG pulses, a new pulse within 100 ms and measured speed at target before reversal;
+a model estimate alone cannot trigger a kick. Missing FG aborts spin at 100 ms;
+spin timeout is 1500 ms. Abort also occurs if spin-up moves the frame >2 deg or
+>10 deg/s, FG exceeds 575 rpm, total jump reaches 2000 ms, |theta|>25 deg, or any IMU
+read fails during the jump. During KICK, FG loss does not alone abort: tilt and
+kick deadlines bound the maneuver. The existing signed estimator survives
+capture and the existing balance controller/integral is reset.
+
+During JUMP_UP, only `stop` and `tel` commands are accepted; other commands are
+ignored to prevent changes or long serial replies from extending the kick.
+`selftest` outside JUMP_UP now includes pure jump checks alongside the existing
+balance/estimator tests. Telemetry uses the unchanged JUMP_UP state name and CSV
+format. `cmd_rpm` during jump is voltage-equivalent speed, not the spin target.
+
+Full sweep, assumptions and risks: [sim/out/jumpup/README.md](../sim/out/jumpup/README.md).
+Host-only tests: `firmware/tests/jump_selftest.cpp` (standard C++11 compiler).
+No board upload or COM3 access was made as part of this implementation.

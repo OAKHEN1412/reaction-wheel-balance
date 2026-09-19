@@ -124,6 +124,10 @@
 #define IMU_GYRO_AXIS             0     // X  (measured)
 #define IMU_GYRO_SIGN             1.0f  // +1 (measured)
 
+// Skip the accelerometer in the complementary filter (gyro-only step) when
+// |accel| differs from 1 g by more than this -- impacts / jump kicks.
+#define ACCEL_GRAVITY_TOL_G       0.25f
+
 // Gyro bias calibration duration at boot (device must be held still).
 #define GYRO_CAL_DURATION_MS      2000
 
@@ -144,18 +148,21 @@
 #define UPRIGHT_HOLD_DEG           3.0f    // must be held within this many degrees...
 #define UPRIGHT_HOLD_MS            500     // ...for this long, to leave WAIT_UPRIGHT
 #define FALL_ANGLE_DEG             20.0f   // |theta| beyond this -> FALLEN
+#define FALL_HOLD_DEG              12.0f   // |theta| beyond this...
+#define FALL_HOLD_MS               300     // ...for this long also counts as FALLEN (rest stop is ~16 deg)
 
 // ----------------------------------------------------------------------------
-// EXPERIMENTAL jump-up-from-rest mode. Disabled by default -- mechanically
-// dependent on the specific frame/wheel/motor and may not work at all, or may
-// damage the frame if the wheel torque is too high. Only enable once BALANCING
-// works reliably and you understand the risk. See firmware/README.md.
+// Manual experimental voltage kick. Never automatically entered.
+// Defaults deliberately under-powered; see sim/out/jumpup and firmware/README.md.
 // ----------------------------------------------------------------------------
-#define ENABLE_JUMP_UP             false
-#define JUMP_SPEED_FRACTION        0.9f    // fraction of max wheel speed to spin up to before braking
-#define JUMP_SPINUP_MS             1500    // time allotted to reach JUMP_SPEED_FRACTION
-#define JUMP_CAPTURE_DEG           15.0f   // |theta| below this after the jump -> hand over to BALANCING
-#define JUMP_TIMEOUT_MS            2000    // give up and go to FALLEN (brakes, then waits for upright) if not captured within this time
+#define ENABLE_JUMP_UP             true
+#define JUMP_SPIN_RPM              500.0f  // wheel RPM; command rejects values above 550.
+                                           // Hardware 2026-09-20: 500/350 self-righted from -15.6 deg and kept
+                                           // balancing; 100-350 rpm only reached -3..-10 deg.
+#define JUMP_KICK_MS               350     // kick deadline; capture at JUMP_CAPTURE_DEG ends it (~190 ms at 500 rpm)
+#define JUMP_CAPTURE_DEG           10.0f   // capture only during reverse-voltage KICK
+// Pure jump logic: 1500 ms spin timeout, 2000 ms total, 25 deg abort,
+// 500 ms rest hold (10..22 deg, <=3 deg/s, <=10 wheel rpm).
 
 // ----------------------------------------------------------------------------
 // Default control gains -- LQR starting point from sim/design_gains.py for the

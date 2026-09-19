@@ -472,3 +472,24 @@ nominal ปัจจุบัน — คอขวดคือ "แรงบิ�
 - **ก่อนขึ้นบอร์ดจริง**: วัดพารามิเตอร์ตามหัวข้อ 6.1 (โดยเฉพาะทอร์กสตอลล์มอเตอร์และ tau_m — สอง
   ตัวที่กระทบผลลัพธ์มากที่สุด) แล้วรัน `design_gains.py --set ... --quick` เพื่อได้เกนที่เหมาะกับ
   ของจริง ไม่ใช่ใช้ nominal เดาๆ ตรงๆ
+
+
+## 2026-09-19: measured-stop voltage jump-up study
+
+The new [jump-up report](out/jumpup/README.md) supersedes the old brake-only
+30-45 deg feasibility discussion above. Run `py -X utf8 jumpup.py --out out/jumpup`
+from `sim/`; all 2,970 grid results, supplemental cases, CSV/JSON and PNG traces
+are retained there. The plant starts at +/-16 deg, spins against the stop, then uses
+reverse voltage before capture with the hardware gains (Kd 500).
+
+Safe initial firmware command: `jump 100 20`, capture 10 deg (predicted rise ~1 deg,
+up to 2.6 deg at 1.5x inertia, followed by return). Expected nominal-inertia working
+candidate: `jump 200 350`, capture 10 deg; simulated overshoot 0.8-1.8 deg including
+half plugging torque, 20-50 ms dead time, and a persistent FG-loss stress test.
+At half nominal inertia, only nominal plugging succeeds (minimum sampled
+250 rpm / 350 ms / 5 deg); neither pessimistic case succeeds in the grid.
+These are conditional predictions, not measured self-righting performance.
+
+The jump model is isolated from the existing `model.py`/`params.py` balance
+regressions so that the old stall-torque cap cannot silently remove plugging.
+Run all tests with `py -X utf8 -m unittest test_model`.

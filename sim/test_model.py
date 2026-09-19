@@ -182,5 +182,84 @@ class TestVoltageMode(unittest.TestCase):
         self.assertLess(c.step(-1, 0, 55)[0], 55)
 
 
+class TestJumpUp(unittest.TestCase):
+    def test_plugging_is_twice_stall_and_half_case_is_half_torque(self):
+        import jumpup as j
+        self.assertAlmostEqual(j.acceleration(-61, 1), 2*61/0.18)
+        self.assertAlmostEqual(j.acceleration(-61, 1, plug_factor=0.5), 61/0.18)
+        self.assertAlmostEqual(j.acceleration(61, -1), -2*61/0.18)
+
+    def test_jump_physics_conserves_momentum_without_gravity(self):
+        import jumpup as j
+        d = params.nominal_derived()
+        iw, C = d['I_w'], d['C']
+        s = (0, 0, -30)
+        initial = iw*s[2]
+        for _ in range(200):
+            s = j.physics_step(s, 1, iw, C, 0, 0.002, 1)
+        self.assertAlmostEqual((C+iw)*s[1]+iw*s[2], initial, places=10)
+
+    def test_mirrored_stops_spin_and_kick_directions(self):
+        import jumpup as j
+        a, ha = j.simulate(kick_ms=200, trace=True)
+        b, hb = j.simulate(kick_ms=200, side=-1, trace=True)
+        self.assertEqual(a['success'], b['success'])
+        for key in ('theta_deg', 'wheel_rpm', 'duty'):
+            np.testing.assert_allclose([r[key] for r in ha], [-r[key] for r in hb], atol=1e-10)
+        spin = [r for r in ha if r['phase'] == 'SPINUP']
+        self.assertTrue(all(r['theta_deg'] == 16 for r in spin))
+        self.assertTrue(all(r['duty'] == -1 for r in spin))
+        kick = [r for r in ha if r['phase'] == 'KICK']
+        self.assertEqual(kick[0]['duty'], 0)
+        self.assertEqual(kick[1]['duty'], 1)
+
+    def test_safe_default_does_not_reach_capture_across_uncertainty(self):
+        import jumpup as j
+        for scale in (0.5, 0.75, 1, 1.25, 1.5):
+            for case in j.CASES:
+                r = j.simulate(inertia_scale=scale, case=case)
+                self.assertFalse(r['success'])
+                self.assertIsNone(r['capture_s'])
+                self.assertIsNone(r['upright_s'])
+                self.assertEqual(r['peak_opposite_deg'], 0)
+                self.assertLess(r['rise_deg'], 6)
+
+    def test_dead_time_consumes_kick_budget(self):
+        import jumpup as j
+        r, h = j.simulate(case='half_50ms', trace=True)
+        self.assertEqual(r['rise_deg'], 0)
+        self.assertTrue(all(x['duty'] == 0 for x in h if x['phase'] == 'KICK'))
+        self.assertEqual(r['final_phase'], 'FALLEN')
+
+    def test_capture_observed_for_three_seconds_and_numerically_converged(self):
+        import jumpup as j
+        r, h = j.simulate(kick_ms=200, trace=True)
+        fine = j.simulate(kick_ms=200, physics_substeps=4)
+        self.assertTrue(r['success'])
+        self.assertTrue(fine['success'])
+        self.assertGreaterEqual(h[-1]['t'] - r['capture_s'], 3-1e-9)
+        self.assertLess(abs(r['peak_opposite_deg']-fine['peak_opposite_deg']), 0.05)
+        self.assertLess(abs(r['upright_s']-fine['upright_s']), 0.01)
+        capture = next(x for x in h if x['phase'] == 'BALANCING')
+        self.assertEqual(capture['duty'], 0)  # firmware coasts on the handover tick
+
+    def test_invalid_jump_settings(self):
+        import jumpup as j
+        for kw in ({'spin_rpm': 600}, {'kick_ms': 0}, {'capture_deg': 16}, {'inertia_scale': 0}):
+            with self.assertRaises(ValueError):
+                j.simulate(**kw)
+
+    def test_expected_working_set_survives_feedback_and_physics_resolution(self):
+        import jumpup as j
+        for case in j.CASES:
+            for feedback in ('ideal', 'fg_dropout'):
+                a = j.simulate(200, 350, 10, case=case, feedback=feedback, physics_substeps=2)
+                b = j.simulate(200, 350, 10, case=case, feedback=feedback, physics_substeps=8)
+                self.assertTrue(a['success'])
+                self.assertTrue(b['success'])
+                self.assertLess(abs(a['peak_opposite_deg']-b['peak_opposite_deg']), 0.02)
+                self.assertLess(b['peak_opposite_deg'], 1.8)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

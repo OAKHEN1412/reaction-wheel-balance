@@ -16,6 +16,7 @@
 #include "complementary_filter.h"
 #include "balance_controller.h"
 #include "wheel_speed_estimator.h"
+#include "jump_controller.h"
 #include "motor.h"
 #include "fg_tach.h"
 #include "imu.h"
@@ -26,11 +27,14 @@ const float kDeg2Rad = PI / 180.0f;
 const float kRad2Deg = 180.0f / PI;
 
 enum class SystemState { CALIBRATING, WAIT_UPRIGHT, BALANCING, FALLEN, JUMP_UP };
-enum class JumpPhase { SPINUP, BRAKING, CAPTURE_WAIT };
 
 SystemState state = SystemState::CALIBRATING;
-JumpPhase jumpPhase = JumpPhase::SPINUP;
-uint32_t jumpPhaseStartMs = 0;
+JumpController jumpController;
+JumpRestGate jumpRestGate;
+uint32_t lastImuOkMs = 0, jumpStartPulses = 0;
+uint32_t jumpLastPulses = 0, jumpLastPulseMs = 0;
+float jumpSpinRpm = JUMP_SPIN_RPM;
+uint16_t jumpKickMs = JUMP_KICK_MS;
 
 ComplementaryFilter tiltFilter(0.98f);
 BalanceController controller;
@@ -118,7 +122,8 @@ void printHelp() {
   Serial.println(F("  save       store gains + offset to EEPROM"));
   Serial.println(F("  start      enable balancing (re-arms WAIT_UPRIGHT gate)"));
   Serial.println(F("  stop       disable balancing, brake+coast motor"));
-  Serial.println(F("  jump       trigger experimental JUMP_UP (if enabled in config.h)"));
+  Serial.println(F("  jump [wheel_rpm] [kick_ms]  manual jump; max 550 rpm / 500 ms"));
+  Serial.println(F("  jumpcfg    print jump parameters and rest gate"));
   Serial.println(F("  tel 0|1    telemetry CSV stream on/off"));
   Serial.println(F("  selftest   run pure-logic self-checks (balance_controller + wheel_speed_estimator)"));
   Serial.println(F("  get        print current gains/state"));
@@ -172,42 +177,43 @@ void handleUprightHoldAndMaybeAdvance(float theta, SystemState nextState) {
   }
 }
 
-void runJumpStep(float thetaRad) {
-  uint32_t elapsed = millis() - jumpPhaseStartMs;
-  switch (jumpPhase) {
-    case JumpPhase::SPINUP: {
-      float frac = JUMP_SPEED_FRACTION * ((float)elapsed / (float)JUMP_SPINUP_MS);
-      if (frac > JUMP_SPEED_FRACTION) frac = JUMP_SPEED_FRACTION;
-      Motor::setSpeed(frac);
-      if (elapsed >= JUMP_SPINUP_MS) {
-        Motor::brake();
-        jumpPhase = JumpPhase::BRAKING;
-        jumpPhaseStartMs = millis();
-      }
-      break;
-    }
-    case JumpPhase::BRAKING: {
-      // Hold the brake briefly so the sudden deceleration transfers momentum
-      // to the frame, then release to coast and watch for capture.
-      if (elapsed >= 100) {
-        Motor::coast();
-        jumpPhase = JumpPhase::CAPTURE_WAIT;
-        jumpPhaseStartMs = millis();
-      }
-      break;
-    }
-    case JumpPhase::CAPTURE_WAIT: {
-      if (fabsf(thetaRad) < JUMP_CAPTURE_DEG * kDeg2Rad) {
-        state = SystemState::BALANCING;
-        controller.reset();
-      } else if (elapsed >= (uint32_t)JUMP_TIMEOUT_MS) {
-        // Not captured in time -- go to FALLEN (brakes, then waits for a
-        // fresh upright hold) rather than WAIT_UPRIGHT directly, consistent
-        // with how every other "give up" path in this state machine works.
-        enterFallen();
-      }
-      break;
-    }
+void printJumpConfig() {
+  printKV(F("jump_spin_rpm="), jumpSpinRpm, 1);
+  printKV(F("jump_kick_ms="), jumpKickMs, 0);
+  printKV(F("jump_capture_deg="), JUMP_CAPTURE_DEG, 1);
+  printKV(F("jump_default_spin_rpm="), JUMP_SPIN_RPM, 1);
+  printKV(F("jump_default_kick_ms="), JUMP_KICK_MS, 0);
+  Serial.println(F("jump: manual only; max=550rpm/500ms; rest=10..22deg <=3dps <=10rpm for 500ms"));
+  Serial.println(F("jump: spin timeout=1500ms total=2000ms abort=25deg; spin FG loss=100ms"));
+}
+
+void runJumpStep(float thetaRad, float rateRad, float fgWheelRpm, bool fgFresh) {
+  uint32_t pulses = FgTach::getPulseCount();
+  if (pulses != jumpLastPulses) { jumpLastPulses = pulses; jumpLastPulseMs = millis(); }
+  bool verified = fgFresh && (uint32_t)(pulses-jumpStartPulses) >= 3 &&
+                  (uint32_t)(millis()-jumpLastPulseMs) < 100;
+  float duty = jumpController.step(millis(), thetaRad*kRad2Deg, rateRad*kRad2Deg, fgWheelRpm, verified);
+  if (!runEnabled || jumpController.phase() == JumpController::Phase::ABORTED) {
+    enterFallen();
+    runEnabled = false; // failed manual attempt cannot automatically re-arm balancing
+    lastCmdRpm = 0;
+    Serial.print(F("jump: aborted ("));
+    Serial.print(JumpController::reasonText(jumpController.abortReason()));
+    Serial.print(F(") theta="));
+    Serial.print(thetaRad * kRad2Deg, 2);
+    Serial.print(F(" rate="));
+    Serial.print(rateRad * kRad2Deg, 1);
+    Serial.print(F(" fg_rpm="));
+    Serial.println(fgWheelRpm, 1);
+    Serial.println(F("jump: issue a fresh jump or start command to re-arm"));
+  } else if (jumpController.phase() == JumpController::Phase::CAPTURED) {
+    Motor::coast();
+    lastCmdRpm = 0;
+    controller.reset(); // preserve the signed wheel estimator through capture
+    state = SystemState::BALANCING;
+  } else {
+    Motor::setSpeed(duty);
+    lastCmdRpm = duty * MOTOR_FULL_SCALE_WHEEL_RADPS * (60.0f/(2.0f*PI));
   }
 }
 
@@ -233,6 +239,13 @@ void runControlStep(float dt) {
   bool ok = Imu::read(sample);
   if (!ok) {
     imuFailCount++;
+    jumpRestGate.reset();
+    if (state == SystemState::JUMP_UP) {
+      enterFallen(); // no open-loop kick on stale tilt, even for one missed read
+      runEnabled = false;
+      lastCmdRpm = 0;
+      Serial.println(F("jump: aborted (IMU read failed)"));
+    }
     if (imuFailCount >= IMU_FAIL_LIMIT) {
       if (!imuFaultReported) {
         Serial.println(F("ERROR: IMU read failed repeatedly -- forcing FALLEN and braking motor."));
@@ -245,11 +258,14 @@ void runControlStep(float dt) {
   }
   imuFailCount = 0;
   imuFaultReported = false;
+  lastImuOkMs = millis();
 
   float accelAngle = IMU_ACCEL_ANGLE_SIGN * accelTiltAngle(sample.accel[IMU_ACCEL_AXIS_NUM], sample.accel[IMU_ACCEL_AXIS_DEN]);
   float gyroRateRadPerSec = IMU_GYRO_SIGN * sample.gyro[IMU_GYRO_AXIS] * kDeg2Rad;
 
-  float filteredAngle = tiltFilter.update(accelAngle, gyroRateRadPerSec, dt);
+  float filteredAngle = accelLooksLikeGravity(sample.accel[0], sample.accel[1], sample.accel[2], ACCEL_GRAVITY_TOL_G)
+      ? tiltFilter.update(accelAngle, gyroRateRadPerSec, dt)
+      : tiltFilter.updateGyroOnly(gyroRateRadPerSec, dt);
   float theta = filteredAngle - uprightOffsetRad;
   float thetaDot = gyroRateRadPerSec;
 
@@ -268,6 +284,10 @@ void runControlStep(float dt) {
   lastThetaDeg = theta * kRad2Deg;
   lastThetaDotDps = thetaDot * kRad2Deg;
   lastWheelRpmSigned = omegaWheelSigned * (60.0f / (2.0f * PI));
+
+  jumpRestGate.update(millis(), lastThetaDeg, lastThetaDotDps,
+      fmaxf(fabsf(lastWheelRpmSigned), wheelRpm),
+      state == SystemState::WAIT_UPRIGHT || state == SystemState::FALLEN);
 
   switch (state) {
     case SystemState::CALIBRATING:
@@ -291,6 +311,23 @@ void runControlStep(float dt) {
         enterFallen();
         break;
       }
+      // The frame's rest stop is at ~16-18 deg, inside FALL_ANGLE_DEG, so a
+      // frame lying on its stop never tripped the check above and the motor
+      // ran at full duty for ~8 s (hardware 2026-09-20). Also call it a fall if
+      // the tilt stays beyond FALL_HOLD_DEG for FALL_HOLD_MS.
+      {
+        static uint32_t beyondSinceMs = 0;
+        if (fabsf(theta) > FALL_HOLD_DEG * kDeg2Rad) {
+          if (beyondSinceMs == 0) beyondSinceMs = millis() | 1;
+          else if ((uint32_t)(millis() - beyondSinceMs) >= FALL_HOLD_MS) {
+            beyondSinceMs = 0;
+            enterFallen();
+            break;
+          }
+        } else {
+          beyondSinceMs = 0;
+        }
+      }
       float omegaCmd = controller.update(theta, thetaDot, omegaWheelSigned, dt);
       applyMotorCommand(omegaCmd, omegaWheelSigned);
       lastCmdRpm = omegaCmd * (60.0f / (2.0f * PI));
@@ -312,7 +349,7 @@ void runControlStep(float dt) {
         state = SystemState::WAIT_UPRIGHT;
         break;
       }
-      runJumpStep(theta);
+      runJumpStep(theta, thetaDot, wheelRpm, fgFresh);
       break;
   }
 }
@@ -349,6 +386,11 @@ void handleCommand(String line) {
   bool hasArg = argStr.length() > 0;
   float argVal = hasArg ? argStr.toFloat() : 0.0f;
 
+  if (state == SystemState::JUMP_UP && cmd != "stop" && cmd != "tel") {
+    // Ignore other commands during the short jump. Long help/config replies can
+    // block the AVR serial buffer and extend an open-loop full-voltage kick.
+    return;
+  }
   ControllerGains g = controller.gains();
 
   if (cmd == "kp") {
@@ -387,16 +429,32 @@ void handleCommand(String line) {
     if (state != SystemState::CALIBRATING) state = SystemState::WAIT_UPRIGHT;
     uprightHoldActive = false;
     Serial.println(F("stop: motor disabled"));
+  } else if (cmd == "jumpcfg") {
+    printJumpConfig();
   } else if (cmd == "jump") {
-    if (!ENABLE_JUMP_UP) {
-      Serial.println(F("jump: disabled (set ENABLE_JUMP_UP true in config.h -- experimental!)"));
-    } else if (state == SystemState::CALIBRATING) {
-      Serial.println(F("jump: cannot start during CALIBRATING"));
+    float rpm = JUMP_SPIN_RPM;
+    uint16_t kick = JUMP_KICK_MS;
+    if (!ENABLE_JUMP_UP || !CONTROL_MODE_VOLTAGE) {
+      Serial.println(F("jump: disabled or not in voltage mode"));
+    } else if (!parseJumpArgs(argStr.c_str(), rpm, kick)) {
+      Serial.println(F("jump: invalid args; 0<rpm<=550, integer 1<=kick_ms<=500"));
+    } else if ((state != SystemState::WAIT_UPRIGHT && state != SystemState::FALLEN) ||
+               imuFailCount || (uint32_t)(millis()-lastImuOkMs) > 20 || !jumpRestGate.ready(millis())) {
+      Serial.println(F("jump: requires fresh IMU, stationary frame at 10..22deg and stopped wheel for 500ms"));
+    } else if (controller.gains().controlSign != 1.0f) {
+      Serial.println(F("jump: requires verified control sign +1"));
     } else {
+      jumpSpinRpm = rpm; jumpKickMs = kick;
+      jumpStartPulses = FgTach::getPulseCount();
+      jumpLastPulses = jumpStartPulses;
+      jumpLastPulseMs = millis();
+      jumpController.begin(millis(), lastThetaDeg, rpm, kick, JUMP_CAPTURE_DEG);
+      jumpRestGate.reset();
+      uprightHoldActive = false;
+      controller.reset();
+      runEnabled = true; // this explicit command also authorizes balance capture
       state = SystemState::JUMP_UP;
-      jumpPhase = JumpPhase::SPINUP;
-      jumpPhaseStartMs = millis();
-      Serial.println(F("jump: starting EXPERIMENTAL jump-up sequence"));
+      Serial.println(F("jump: manual SPINUP then reverse-voltage KICK"));
     }
   } else if (cmd == "tel") {
     telemetryEnabled = hasArg ? (argVal != 0.0f) : !telemetryEnabled;
@@ -420,6 +478,7 @@ void handleCommand(String line) {
       Serial.print(msg ? msg : "unknown");
       Serial.println(')');
     }
+    Serial.println(jumpControllerSelfTest() ? F("selftest: jump_controller PASS") : F("selftest: jump_controller FAIL"));
   } else if (cmd == "get") {
     printGet();
   } else if (cmd == "help") {
@@ -430,16 +489,21 @@ void handleCommand(String line) {
 }
 
 void pollSerial() {
+  static bool discardLine = false;
   while (Serial.available() > 0) {
     char c = (char)Serial.read();
     if (c == '\n' || c == '\r') {
-      if (serialBuf.length() > 0) {
+      if (!discardLine && serialBuf.length() > 0) {
         handleCommand(serialBuf);
-        serialBuf = "";
       }
-    } else {
+      serialBuf = "";
+      discardLine = false;
+    } else if (!discardLine) {
       serialBuf += c;
-      if (serialBuf.length() > 63) serialBuf = ""; // guard against garbage/overflow
+      if (serialBuf.length() > 63) {
+        serialBuf = "";
+        discardLine = true; // never interpret an overlong line's tail as "jump"
+      }
     }
   }
 }
