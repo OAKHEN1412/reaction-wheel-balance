@@ -10,7 +10,7 @@
 // reference.
 // =============================================================================
 #include <Arduino.h>
-#include <Preferences.h>
+#include <EEPROM.h>
 
 #include "config.h"
 #include "complementary_filter.h"
@@ -35,7 +35,6 @@ uint32_t jumpPhaseStartMs = 0;
 ComplementaryFilter tiltFilter(0.98f);
 BalanceController controller;
 WheelSpeedEstimator wheelEst(MOTOR_TAU_S);
-Preferences prefs;
 
 float uprightOffsetRad = 0.0f;
 bool telemetryEnabled = false;
@@ -67,29 +66,45 @@ const char *stateName(SystemState s) {
   return "?";
 }
 
+// Persisted settings. The magic word marks a valid record; a blank/foreign
+// EEPROM (all 0xFF) falls back to the config.h defaults.
+struct StoredPrefs {
+  uint16_t magic;
+  float kp, kd, kw, ki, sign, offset;
+};
+
 void loadPrefs() {
-  prefs.begin(NVS_NAMESPACE, true); // read-only
+  StoredPrefs sp;
+  EEPROM.get(EEPROM_ADDR, sp);
   ControllerGains g;
-  g.kp = prefs.getFloat("kp", DEFAULT_KP);
-  g.kd = prefs.getFloat("kd", DEFAULT_KD);
-  g.kw = prefs.getFloat("kw", DEFAULT_KW);
-  g.ki = prefs.getFloat("ki", DEFAULT_KI);
-  g.controlSign = prefs.getFloat("sign", DEFAULT_CONTROL_SIGN);
-  uprightOffsetRad = prefs.getFloat("offset", 0.0f);
-  prefs.end();
+  if (sp.magic == EEPROM_MAGIC) {
+    g.kp = sp.kp;
+    g.kd = sp.kd;
+    g.kw = sp.kw;
+    g.ki = sp.ki;
+    g.controlSign = sp.sign;
+    uprightOffsetRad = sp.offset;
+  } else {
+    g.kp = DEFAULT_KP;
+    g.kd = DEFAULT_KD;
+    g.kw = DEFAULT_KW;
+    g.ki = DEFAULT_KI;
+    g.controlSign = DEFAULT_CONTROL_SIGN;
+    uprightOffsetRad = 0.0f;
+  }
   controller.setGains(g);
 }
 
 void savePrefs() {
   const ControllerGains &g = controller.gains();
-  prefs.begin(NVS_NAMESPACE, false); // read-write
-  prefs.putFloat("kp", g.kp);
-  prefs.putFloat("kd", g.kd);
-  prefs.putFloat("kw", g.kw);
-  prefs.putFloat("ki", g.ki);
-  prefs.putFloat("sign", g.controlSign);
-  prefs.putFloat("offset", uprightOffsetRad);
-  prefs.end();
+  StoredPrefs sp = {EEPROM_MAGIC, g.kp, g.kd, g.kw, g.ki, g.controlSign, uprightOffsetRad};
+  EEPROM.put(EEPROM_ADDR, sp); // put() only rewrites bytes that changed
+}
+
+// AVR printf has no %f, so floats go through Serial.print(value, digits).
+void printKV(const __FlashStringHelper *key, float value, uint8_t digits) {
+  Serial.print(key);
+  Serial.println(value, digits);
 }
 
 void printHelp() {
@@ -100,7 +115,7 @@ void printHelp() {
   Serial.println(F("  ki [v]     get/set integral gain (0 = disabled)"));
   Serial.println(F("  sign [v]   get/set overall control sign (+1/-1)"));
   Serial.println(F("  zero       set current filtered angle as upright offset"));
-  Serial.println(F("  save       store gains + offset to NVS"));
+  Serial.println(F("  save       store gains + offset to EEPROM"));
   Serial.println(F("  start      enable balancing (re-arms WAIT_UPRIGHT gate)"));
   Serial.println(F("  stop       disable balancing, brake+coast motor"));
   Serial.println(F("  jump       trigger experimental JUMP_UP (if enabled in config.h)"));
@@ -112,10 +127,26 @@ void printHelp() {
 
 void printGet() {
   const ControllerGains &g = controller.gains();
-  Serial.printf("state=%s kp=%.4f kd=%.4f kw=%.4f ki=%.4f sign=%.0f offset_deg=%.3f tel=%d run=%d loop_overruns=%lu\n",
-                stateName(state), g.kp, g.kd, g.kw, g.ki, g.controlSign,
-                uprightOffsetRad * kRad2Deg, telemetryEnabled ? 1 : 0, runEnabled ? 1 : 0,
-                (unsigned long)loopOverrunCount);
+  Serial.print(F("state="));
+  Serial.print(stateName(state));
+  Serial.print(F(" kp="));
+  Serial.print(g.kp, 4);
+  Serial.print(F(" kd="));
+  Serial.print(g.kd, 4);
+  Serial.print(F(" kw="));
+  Serial.print(g.kw, 4);
+  Serial.print(F(" ki="));
+  Serial.print(g.ki, 4);
+  Serial.print(F(" sign="));
+  Serial.print(g.controlSign, 0);
+  Serial.print(F(" offset_deg="));
+  Serial.print(uprightOffsetRad * kRad2Deg, 3);
+  Serial.print(F(" tel="));
+  Serial.print(telemetryEnabled ? 1 : 0);
+  Serial.print(F(" run="));
+  Serial.print(runEnabled ? 1 : 0);
+  Serial.print(F(" loop_overruns="));
+  Serial.println(loopOverrunCount);
 }
 
 void enterFallen() {
@@ -180,14 +211,14 @@ void runJumpStep(float thetaRad) {
   }
 }
 
-// Applies a control-computed wheel speed command to the motor. If
+// Applies u*omega_fs (voltage mode) or legacy speed command. If
 // ACTIVE_DECEL_BRAKE is enabled and this step is a large same-direction
 // deceleration (the driver likely can't coast down that fast on its own),
 // pulses the physical brake for this control step instead of just lowering
 // duty. See config.h ACTIVE_DECEL_BRAKE and motor_test's 'coastdown'.
 void applyMotorCommand(float omegaCmdNew, float omegaEstSigned) {
   if (ACTIVE_DECEL_BRAKE) {
-    bool sameSign = (omegaCmdNew * omegaEstSigned) > 0.0f;
+    bool sameSign = (omegaCmdNew * omegaEstSigned) >= 0.0f;
     float decel = fabsf(omegaEstSigned) - fabsf(omegaCmdNew);
     if (sameSign && decel > DECEL_BRAKE_MARGIN_RADPS) {
       Motor::brake();
@@ -230,9 +261,9 @@ void runControlStep(float dt) {
   // Signed wheel speed estimate: NOT Motor::currentDirectionSign() (that
   // flips the instant a new direction is commanded, while the wheel is
   // still coasting the old way by inertia -- see wheel_speed_estimator.h).
-  // The lag model tracks the PREVIOUS step's commanded speed, which is the
-  // causally-correct target to be lagging toward at this instant.
-  float omegaWheelSigned = wheelEst.update(controller.omegaCmd(), wheelRadPerSecMagnitude, fgFresh, dt);
+  // Predict from PREVIOUS applied signed duty, including reversal blanks,
+  // brake/coast and jump mode; requested controller output may differ.
+  float omegaWheelSigned = wheelEst.update(Motor::currentDirectionSign() * Motor::currentDutyFraction() * MOTOR_FULL_SCALE_WHEEL_RADPS, wheelRadPerSecMagnitude, fgFresh, dt);
 
   lastThetaDeg = theta * kRad2Deg;
   lastThetaDotDps = thetaDot * kRad2Deg;
@@ -291,9 +322,20 @@ void printTelemetry() {
   uint32_t now = millis();
   if (now - lastMs < (uint32_t)(1000 / TELEMETRY_RATE_HZ)) return;
   lastMs = now;
-  Serial.printf("%lu,%s,%.3f,%.3f,%.2f,%.2f,%.3f\n",
-                (unsigned long)now, stateName(state), lastThetaDeg, lastThetaDotDps,
-                lastWheelRpmSigned, lastCmdRpm, Motor::currentDutyFraction());
+  // CSV: ms,state,theta_deg,theta_dot_dps,wheel_rpm,cmd_rpm,duty
+  Serial.print(now);
+  Serial.print(',');
+  Serial.print(stateName(state));
+  Serial.print(',');
+  Serial.print(lastThetaDeg, 3);
+  Serial.print(',');
+  Serial.print(lastThetaDotDps, 3);
+  Serial.print(',');
+  Serial.print(lastWheelRpmSigned, 2);
+  Serial.print(',');
+  Serial.print(lastCmdRpm, 2);
+  Serial.print(',');
+  Serial.println(Motor::currentDutyFraction(), 3);
 }
 
 void handleCommand(String line) {
@@ -311,25 +353,27 @@ void handleCommand(String line) {
 
   if (cmd == "kp") {
     if (hasArg) { g.kp = argVal; controller.setGains(g); }
-    Serial.printf("kp=%.4f\n", controller.gains().kp);
+    printKV(F("kp="), controller.gains().kp, 4);
   } else if (cmd == "kd") {
     if (hasArg) { g.kd = argVal; controller.setGains(g); }
-    Serial.printf("kd=%.4f\n", controller.gains().kd);
+    printKV(F("kd="), controller.gains().kd, 4);
   } else if (cmd == "kw") {
     if (hasArg) { g.kw = argVal; controller.setGains(g); }
-    Serial.printf("kw=%.4f\n", controller.gains().kw);
+    printKV(F("kw="), controller.gains().kw, 4);
   } else if (cmd == "ki") {
     if (hasArg) { g.ki = argVal; controller.setGains(g); }
-    Serial.printf("ki=%.4f\n", controller.gains().ki);
+    printKV(F("ki="), controller.gains().ki, 4);
   } else if (cmd == "sign") {
     if (hasArg) { g.controlSign = (argVal < 0) ? -1.0f : 1.0f; controller.setGains(g); }
-    Serial.printf("sign=%.0f\n", controller.gains().controlSign);
+    printKV(F("sign="), controller.gains().controlSign, 0);
   } else if (cmd == "zero") {
     uprightOffsetRad = tiltFilter.angle();
-    Serial.printf("zero: upright offset set to %.3f deg\n", uprightOffsetRad * kRad2Deg);
+    Serial.print(F("zero: upright offset set to "));
+    Serial.print(uprightOffsetRad * kRad2Deg, 3);
+    Serial.println(F(" deg"));
   } else if (cmd == "save") {
     savePrefs();
-    Serial.println(F("saved gains + offset to NVS"));
+    Serial.println(F("saved gains + offset to EEPROM"));
   } else if (cmd == "start") {
     runEnabled = true;
     if (state == SystemState::FALLEN || state == SystemState::JUMP_UP) state = SystemState::WAIT_UPRIGHT;
@@ -356,21 +400,25 @@ void handleCommand(String line) {
     }
   } else if (cmd == "tel") {
     telemetryEnabled = hasArg ? (argVal != 0.0f) : !telemetryEnabled;
-    Serial.printf("telemetry %s\n", telemetryEnabled ? "on" : "off");
+    Serial.println(telemetryEnabled ? F("telemetry on") : F("telemetry off"));
   } else if (cmd == "selftest") {
     const char *msg = nullptr;
     bool passed = balanceControllerSelfTest(&msg);
     if (passed) {
       Serial.println(F("selftest: balance_controller PASS"));
     } else {
-      Serial.printf("selftest: balance_controller FAIL (%s)\n", msg ? msg : "unknown");
+      Serial.print(F("selftest: balance_controller FAIL ("));
+      Serial.print(msg ? msg : "unknown");
+      Serial.println(')');
     }
     msg = nullptr;
     bool passed2 = wheelSpeedEstimatorSelfTest(&msg);
     if (passed2) {
       Serial.println(F("selftest: wheel_speed_estimator PASS"));
     } else {
-      Serial.printf("selftest: wheel_speed_estimator FAIL (%s)\n", msg ? msg : "unknown");
+      Serial.print(F("selftest: wheel_speed_estimator FAIL ("));
+      Serial.print(msg ? msg : "unknown");
+      Serial.println(')');
     }
   } else if (cmd == "get") {
     printGet();
@@ -415,6 +463,8 @@ void setup() {
 
   loadPrefs();
   ControllerLimits limits;
+  limits.voltageMode = CONTROL_MODE_VOLTAGE;
+  limits.motorTauS = MOTOR_TAU_S;
   limits.maxWheelSpeed = MAX_WHEEL_SPEED_RADPS;
   limits.fullScaleWheelSpeed = MOTOR_FULL_SCALE_WHEEL_RADPS;
   limits.minDutyFraction = MOTOR_MIN_DUTY_FRACTION;
@@ -427,7 +477,8 @@ void setup() {
   if (!imuOk) {
     Serial.println(F("WARNING: IMU did not respond as expected at begin() -- check wiring/address."));
   }
-  Serial.printf("IMU WHO_AM_I=0x%02X\n", Imu::lastWhoAmI());
+  Serial.print(F("IMU WHO_AM_I=0x"));
+  Serial.println(Imu::lastWhoAmI(), HEX);
 
   Serial.println(F("Calibrating gyro bias -- keep the frame still..."));
   Imu::calibrateGyroBias(GYRO_CAL_DURATION_MS);

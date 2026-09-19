@@ -307,7 +307,7 @@ def parse_set_args(pairs):
         k = k.strip()
         if k not in params.NOMINAL:
             raise ValueError(f"ไม่รู้จักพารามิเตอร์ '{k}' (ดูชื่อที่ใช้ได้ใน params.NOMINAL)")
-        out[k] = float(v)
+        out[k] = v if k == "control_mode" else float(v)
     return out
 
 
@@ -347,8 +347,9 @@ def quick_report(overrides: dict, n_verify=20, T=3.5):
     print(f"  #define DEFAULT_KD   {g['Kd']:.4f}f")
     print(f"  #define DEFAULT_KW   {g['Kw']:.4f}f")
     print(f"  #define DEFAULT_KI   {g['Ki']:.4f}f")
-    print(f"  #define MOTOR_TAU_S  {dp['tau_m']:.4f}f   // time constant มอเตอร์ที่ใช้ตอนออกแบบ"
+    print(f"  #define MOTOR_TAU_S  {dp['tau_m_est']:.4f}f   // time constant มอเตอร์ที่ใช้ตอนออกแบบ"
           f" (measure จริงจาก motor_test FG log ถ้าเป็นไปได้)")
+    print(f"  #define CONTROL_MODE_VOLTAGE {str(dp['control_mode'] == 'voltage').lower()}")
     print(f"  #define GEAR_RATIO   {dp['gear_ratio']:.4f}f")
     print(f"  // deadband แนะนำ ~0.3 rad/s (จาก sim, กันคำสั่งเล็กเกินไปที่ ESC/มอเตอร์ไม่ขยับจริง)")
     print(f"  // omega_max (clamp) = {dp['omega_max']:.2f} rad/s = "
@@ -436,8 +437,8 @@ def build_argparser():
 
 if __name__ == "__main__":
     args = build_argparser().parse_args()
-    if args.set is not None:
-        overrides = parse_set_args(args.set)
+    if args.set is not None or args.quick:
+        overrides = parse_set_args(args.set or [])
         quick_report(overrides, n_verify=20 if args.quick else 60)
     else:
         full_report()

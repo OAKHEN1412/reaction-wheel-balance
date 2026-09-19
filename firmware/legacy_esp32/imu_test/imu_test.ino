@@ -15,11 +15,13 @@
 //
 // This sketch is intentionally self-contained (no shared headers with the
 // main firmware) so it can be flashed before any config.h values are known.
-// Board: Arduino Mega 2560 -- MPU-6050 SDA -> D20, SCL -> D21, VCC -> 5V.
-// Output lines are parsed by tools/imu_viewer.html, keep the format.
 // =============================================================================
 #include <Arduino.h>
 #include <Wire.h>
+
+// ---- pins (must match the main firmware's config.h) ----
+static const int PIN_SDA = 8;
+static const int PIN_SCL = 9;
 
 static const uint8_t MPU_ADDR = 0x68;
 static const uint8_t REG_WHO_AM_I = 0x75;
@@ -53,9 +55,8 @@ void setup() {
   delay(300);
   Serial.println(F("imu_test: raw MPU-6050 axis/sign discovery"));
 
-  Wire.begin(); // Mega: SDA = D20, SCL = D21
+  Wire.begin(PIN_SDA, PIN_SCL);
   Wire.setClock(400000);
-  Wire.setWireTimeout(3000, true); // don't hang forever on a loose wire
 
   writeReg(REG_PWR_MGMT_1, 0x00); // wake
   delay(10);
@@ -66,9 +67,7 @@ void setup() {
   if (Wire.endTransmission(false) == 0 && Wire.requestFrom((int)MPU_ADDR, 1, (int)true) == 1) {
     who = Wire.read();
   }
-  Serial.print(F("WHO_AM_I = 0x"));
-  Serial.print(who, HEX);
-  Serial.println(F(" (genuine MPU-6050 = 0x68; some clones differ)"));
+  Serial.printf("WHO_AM_I = 0x%02X (genuine MPU-6050 = 0x68; some clones differ)\n", who);
 
   writeReg(REG_CONFIG, 0x03);       // DLPF ~44Hz
   writeReg(REG_GYRO_CONFIG, 0x08);  // +-500 dps
@@ -84,7 +83,7 @@ void setup() {
 void loop() {
   uint8_t buf[14];
   if (!readRegs(REG_ACCEL_XOUT_H, buf, 14)) {
-    Serial.println(F("I2C read failed -- check wiring (SDA=D20, SCL=D21, addr 0x68)"));
+    Serial.println(F("I2C read failed -- check wiring (SDA=GPIO8, SCL=GPIO9, addr 0x68)"));
     delay(200);
     return;
   }
@@ -106,18 +105,8 @@ void loop() {
   float aXY = atan2(ax, ay) * 180.0f / PI;
   float aYX = atan2(ay, ax) * 180.0f / PI;
 
-  // a=ax,ay,az  g=gx,gy,gz  |  6 candidate angles  (AVR printf has no %f)
-  Serial.print(F("a="));
-  Serial.print(ax, 2); Serial.print(','); Serial.print(ay, 2); Serial.print(','); Serial.print(az, 2);
-  Serial.print(F("  g="));
-  Serial.print(gx, 1); Serial.print(','); Serial.print(gy, 1); Serial.print(','); Serial.print(gz, 1);
-  Serial.print(F("  |"));
-  const float cand[6] = {aYZ, aZY, aXZ, aZX, aXY, aYX};
-  for (int i = 0; i < 6; i++) {
-    Serial.print(F("  "));
-    Serial.print(cand[i], 1);
-  }
-  Serial.println();
+  Serial.printf("a=%.2f,%.2f,%.2f  g=%.1f,%.1f,%.1f  |  %.1f  %.1f  %.1f  %.1f  %.1f  %.1f\n",
+                ax, ay, az, gx, gy, gz, aYZ, aZY, aXZ, aZX, aXY, aYX);
 
   delay(100);
 }

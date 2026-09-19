@@ -1,0 +1,286 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>IMU · Axis & sign viewer</title>
+<style>
+:root{color-scheme:dark light;--bg:#10151e;--panel:#1a2230;--text:#e7edf6;--muted:#9eacc1;--line:#344258;--accent:#66d9da;--good:#72df9d;--bad:#ff8585}
+@media(prefers-color-scheme:light){:root{--bg:#edf2f6;--panel:#fff;--text:#182434;--muted:#526278;--line:#c9d3df;--accent:#007a80;--good:#137340;--bad:#bb3030}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:15px/1.6 system-ui,sans-serif}main{max-width:1450px;margin:auto;padding:22px}h1{font-size:25px;margin:0}h2{font-size:17px;margin:0 0 12px}p{margin:6px 0 12px}.muted,small{color:var(--muted)}.bar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:15px 0}.layout{display:grid;grid-template-columns:minmax(0,1.6fr) minmax(320px,1fr);gap:16px}.card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:18px;margin-bottom:16px}button,select{font:inherit;color:var(--text);background:var(--bg);border:1px solid var(--line);border-radius:7px;padding:7px 11px}button{cursor:pointer}button:hover:enabled{border-color:var(--accent)}button:disabled{opacity:.45;cursor:default}label{display:flex;flex-direction:column;gap:4px;font-size:13px}.controls{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}.good{color:var(--good)}.bad{color:var(--bad)}#view{height:410px;position:relative;overflow:hidden;border-radius:10px;background:#101824;touch-action:none}#view canvas{display:block;width:100%;height:100%}.overlay{position:absolute;top:10px;left:12px;color:#b8c7dc;pointer-events:none;font-size:12px}#sceneError{position:absolute;inset:60px 20px;color:#ffaaaa}#chart{width:100%;height:190px;display:block}.readouts{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}.metric{background:var(--bg);padding:9px;border-radius:8px}.metric span{display:block;font:16px ui-monospace,monospace}.metric small{font-size:12px}table{width:100%;border-collapse:collapse;font-size:13px}td,th{text-align:left;padding:5px;border-bottom:1px solid var(--line)}tr.near{background:color-mix(in srgb,var(--good) 14%,transparent)}tr.selected td:first-child{color:var(--accent);font-weight:bold}pre{white-space:pre-wrap;overflow-wrap:anywhere;background:var(--bg);padding:12px;border-radius:8px;font:12px/1.7 ui-monospace,monospace}#log{height:110px;overflow:auto;margin-bottom:0}code{font-size:.9em}#serialWarning:empty{display:none}@media(max-width:850px){.layout{grid-template-columns:1fr}main{padding:12px}#view{height:330px}}
+</style>
+</head>
+<body><main>
+<h1>IMU viewer <span class="muted">/ แกน & เครื่องหมาย</span></h1>
+<p class="muted">Reaction-wheel robot · Arduino Mega 2560 + MPU-6050 · จับเฟรมเอียงด้วยมือเพื่อเลือกค่าใน config.h</p>
+<div class="bar"><button id="connect">Connect · 115200</button><button id="disconnect" disabled>Disconnect</button><button id="demo">Demo</button><span id="status" role="status">ยังไม่เชื่อมต่อ</span></div>
+<p id="serialWarning" class="bad"></p>
+<div class="layout"><section>
+<div class="card"><div id="view"><div class="overlay">ซ้าย: MPU (yaw คงที่) · ขวา: เฟรม / ล้อ Ø20 cm<br>ลากเพื่อหมุนมุมมอง · scroll เพื่อซูม · double-click กลับด้านหน้าล้อ</div><div id="sceneError"></div></div><p class="muted"><small>เฟรมหมุนรอบขอบล่างตาม theta ที่หัก zero แล้ว · เส้นตั้งคือ 0° · + เอียงขวาเมื่อมองจากด้านหน้าล้อ</small></p></div>
+<div class="card"><h2>ข้อมูลสด</h2><div id="readouts" class="readouts"></div><p id="health" role="status" class="muted">รอข้อมูล a=… g=…</p><p id="angles">theta_accel raw — · zeroed — · theta_dot_gyro —</p><p id="consistency" role="status" class="muted">รอการเคลื่อนไหวเพื่อเทียบเครื่องหมาย</p><canvas id="chart" aria-label="กราฟ theta_accel และ integrated gyro ช่วง 10 วินาที"></canvas><small><span style="color:var(--accent)">━ theta_accel (zeroed)</span> · <span style="color:#df9eeb">━ integrated gyro</span> · หน่วย ° / เวลา 10 s · gyro ไม่หัก bias จึงอาจ drift</small></div>
+<div class="card"><h2>Raw serial log</h2><pre id="log" aria-label="Raw serial log"></pre></div>
+</section><aside>
+<div class="card"><h2>เลือก candidate balance angle</h2><div class="controls">
+<label>Accel NUM<select id="num"><option value="0">0 · x</option><option value="1" selected>1 · y</option><option value="2">2 · z</option></select></label>
+<label>Accel DEN<select id="den"><option value="0">0 · x</option><option value="1">1 · y</option><option value="2" selected>2 · z</option></select></label>
+<label>Angle sign<select id="asign"><option value="1">+1</option><option value="-1">-1</option></select></label>
+<label>Gyro axis<select id="gaxis"><option value="0">0 · x</option><option value="1">1 · y</option><option value="2">2 · z</option></select></label>
+<label>Gyro sign<select id="gsign"><option value="1">+1</option><option value="-1">-1</option></select></label>
+</div><div class="bar"><button id="zero">Zero / set upright</button><span id="offset" class="muted">offset 0.00°</span></div><small>theta_raw = sign × atan2(a[NUM], a[DEN])<br>theta_dot = sign × g[axis] · เปลี่ยนตัวเลือกจะล้าง zero และกราฟ</small></div>
+<div class="card"><h2>ทั้ง 6 คู่ · มุมก่อนคูณ sign</h2><table><thead><tr><th>Angle</th><th>ตอนนี้</th><th>upright ที่บันทึก</th></tr></thead><tbody id="candidates"></tbody></table><small>พื้นสีเขียว: |angle| &lt; 5° (ใช้ upright ที่บันทึกถ้ามี) · คู่ที่ฉายแรงโน้มถ่วงได้น้อยจะไม่ใช้</small></div>
+<div class="card"><h2>Auto-suggest</h2><p>1. ตั้งเฟรมตรงและหยุดนิ่ง กด Record upright รอ 1 วินาที<br>2. ค่อย ๆ เอียงไปด้านที่ต้องการเรียก “+” ราว 10–20° แล้วหยุดนิ่ง<br>3. กด Record tilt + และค้างไว้ 1 วินาที</p><div class="bar"><button id="upright">Record upright</button><button id="tilt" disabled>Record tilt +</button></div><p id="suggestStatus" role="status" class="muted">เก็บ gyro ระหว่างสองท่าเพื่อหาแกนและเครื่องหมาย</p><pre id="snippet">// เลือกค่าหรือใช้ Auto-suggest</pre><small>Snippet แสดงค่าที่เลือกอยู่ ไม่เขียนไฟล์ firmware · zero ในหน้านี้ไม่ถูกรวมใน 5 defines · ตรวจด้วยมืออีกครั้งก่อนนำไปใช้</small></div>
+<div class="card"><h2>ข้อตกลงก่อนทดสอบ</h2><p>เฟรมตั้งบนขอบสมดุล ระนาบล้อแนวตั้ง = <b>0°</b> แนะนำให้ยืนหันหน้าเข้าหาหน้าล้อ แล้วเอียงไปทาง<b>ขวา = บวก</b></p><p>ทิศบวกต้องตรงกับทิศที่ใช้ใน <code>motor_test</code> สำหรับ <code>DIR_CW_LEVEL / DEFAULT_CONTROL_SIGN</code> หน้านี้วัดเฉพาะ IMU จึงเลือกค่ามอเตอร์แทนไม่ได้</p><p>สนใจเฉพาะการหมุนรอบแกนหมุนของ flywheel; การเอียงอีกแกนควรใกล้ 0 ขณะทดสอบ</p><small>เปิดไฟล์นี้โดยตรงใน Chrome/Edge ได้ · ปิด Serial Monitor ก่อน Connect · ภาพ 3D ต้องใช้อินเทอร์เน็ตเพื่อโหลด three.js จาก CDN · Demo ใช้ ay/az กับ gx</small></div>
+</aside></div></main>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+'use strict';
+const $ = id => document.getElementById(id);
+const DEG = 180 / Math.PI, RAD = Math.PI / 180;
+const pairs = [[1,2],[2,1],[0,2],[2,0],[0,1],[1,0]], axes = ['x','y','z'];
+const wrap = degrees => ((degrees + 180) % 360 + 360) % 360 - 180;
+const selection = () => Object.fromEntries(['num','den','asign','gaxis','gsign'].map(id => [id, Number($(id).value)]));
+const angle = (a,n,d) => n !== d && Math.hypot(a[n],a[d]) > .15 ? Math.atan2(a[n],a[d])*DEG : null;
+const numberPattern = '[+-]?(?:\\d+(?:\\.\\d*)?|\\.\\d+)(?:[eE][+-]?\\d+)?';
+const triple = key => new RegExp('(?:^|\\s)' + key + '\\s*=\\s*(' + numberPattern + ')\\s*,\\s*(' + numberPattern + ')\\s*,\\s*(' + numberPattern + ')(?=\\s|\\||$)', 'i');
+const accelPattern = triple('a'), gyroPattern = triple('g');
+function parseLine(line) {
+  const a = line.match(accelPattern), g = line.match(gyroPattern);
+  if (!a || !g) return null;
+  const values = [...a.slice(1),...g.slice(1)].map(Number);
+  return values.every(Number.isFinite) ? {a:values.slice(0,3),g:values.slice(3)} : null;
+}
+let latest = null, offset = 0, trace = [], rateHistory = [], integrated = null, previous = null;
+let upright = null, motion = [], capture = null, demoTimer = null, port = null, reader = null, readTask = null, closing = false;
+let roll = 0, pitch = 0, orientationReady = false, frame = null, board = null;
+const logLines = [];
+function log(line) {
+  const element = $('log'), atBottom = element.scrollHeight-element.scrollTop-element.clientHeight < 30;
+  logLines.push(line.slice(0,1000)); if (logLines.length > 80) logLines.shift();
+  element.textContent = logLines.join('\n'); if (atBottom) element.scrollTop = element.scrollHeight;
+}
+for (const name of ['ax','ay','az','gx','gy','gz']) {
+  const node = document.createElement('div'); node.className='metric';
+  node.innerHTML='<small>'+name+' · '+(name[0]==='a'?'g':'°/s')+'</small><span id="'+name+'">—</span>';
+  $('readouts').appendChild(node);
+}
+function snippet() {
+  const c=selection();
+  $('snippet').textContent = (c.num===c.den?'// ไม่ถูกต้อง: NUM และ DEN ต้องต่างกัน\n':'') +
+    [['IMU_ACCEL_AXIS_NUM',c.num],['IMU_ACCEL_AXIS_DEN',c.den],['IMU_ACCEL_ANGLE_SIGN',c.asign],['IMU_GYRO_AXIS',c.gaxis],['IMU_GYRO_SIGN',c.gsign]].map(([key,value])=>'#define '+key.padEnd(23)+' '+value).join('\n');
+}
+function resetPlot() { trace=[];rateHistory=[];integrated=null;previous=null; }
+function showCandidates() {
+  const c=selection();
+  $('candidates').innerHTML=pairs.map(([n,d])=>{
+    const value=latest?angle(latest.a,n,d):null, base=upright?angle(upright.a,n,d):value;
+    return '<tr class="'+(base!==null&&Math.abs(base)<5?'near ':'')+(n===c.num&&d===c.den?'selected':'')+'"><td>atan2(a'+axes[n]+',a'+axes[d]+')</td><td>'+(value===null?'—':value.toFixed(1)+'°')+'</td><td>'+(upright&&base!==null?base.toFixed(1)+'°':'—')+'</td></tr>';
+  }).join('');
+}
+function renderValues() {
+  if (!latest) return;
+  const {a,g}=latest,c=selection(),candidate=angle(a,c.num,c.den),norm=Math.hypot(...a);
+  [...a,...g].forEach((v,i)=>$(i<3?'a'+axes[i]:'g'+axes[i-3]).textContent=v.toFixed(i<3?3:2));
+  $('health').textContent='|a| = '+norm.toFixed(3)+' g'+(norm<.01?' · ค่าเป็นศูนย์: sensor asleep / ไม่ได้รับไฟ':Math.abs(norm-1)>.2?' · ไม่ใกล้ 1 g: ตรวจ sensor หรือหยุดการเร่ง':' · ใกล้ 1 g');
+  $('health').className=norm<.01||Math.abs(norm-1)>.2?'bad':'good';
+  $('angles').textContent=candidate===null?'มุมไม่ถูกต้อง: เลือก NUM ≠ DEN และคู่ที่มีแรงโน้มถ่วงเพียงพอ':
+    'theta_accel raw '+(candidate*c.asign).toFixed(2)+'° · zeroed '+wrap(candidate*c.asign-offset).toFixed(2)+'° · theta_dot_gyro '+(g[c.gaxis]*c.gsign).toFixed(2)+'°/s';
+  if(frame && candidate!==null) frame.rotation.z=-wrap(candidate*c.asign-offset)*RAD;
+  showCandidates();
+}
+function consistency() {
+  const e=$('consistency'); e.className='muted';
+  if(rateHistory.length<4) {e.textContent='รอการเคลื่อนไหวเพื่อเทียบเครื่องหมาย';return;}
+  const first=rateHistory[0],last=rateHistory[rateHistory.length-1],dt=last.t-first.t;
+  let delta=0,gyro=0;
+  for(let i=1;i<rateHistory.length;i++) {const a=rateHistory[i-1],b=rateHistory[i];delta+=wrap(b.theta-a.theta);gyro+=(a.rate+b.rate)/2*(b.t-a.t);}
+  if(dt<.3 || Math.abs(delta)/dt<2 || Math.abs(gyro)/dt<2) {e.textContent='เคลื่อนช้า / หยุดนิ่ง — ยังสรุปเครื่องหมายไม่ได้';return;}
+  const matches=delta*gyro>0;e.className=matches?'good':'bad';
+  e.textContent=matches?'gyro sign matches · เครื่องหมายตรงกัน':'gyro sign opposite → flip IMU_GYRO_SIGN';
+}
+function ingest(sample,t=performance.now()/1000) {
+  latest={...sample,t};
+  const c=selection(),raw=angle(sample.a,c.num,c.den),dt=previous?t-previous.t:0;
+  const validDt=dt>0 && dt<.5;
+  // Standard ZYX roll/pitch: gravity in sensor coordinates, world yaw fixed at zero.
+  const [ax,ay,az]=sample.a, measuredRoll=Math.atan2(ay,az),measuredPitch=Math.atan2(-ax,Math.hypot(ay,az));
+  if(Math.hypot(ax,ay,az)>.1) {
+    if(!orientationReady||!validDt) {roll=measuredRoll;pitch=measuredPitch;orientationReady=true;}
+    else {
+      const [p,q,r]=sample.g.map(v=>v*RAD),sr=Math.sin(roll),cr=Math.cos(roll);
+      const predictedRoll=roll+(p+sr*Math.tan(pitch)*q+cr*Math.tan(pitch)*r)*dt;
+      const predictedPitch=pitch+(cr*q-sr*r)*dt;
+      const alpha=Math.pow(.98,dt/.1);
+      roll=predictedRoll+(1-alpha)*wrap((measuredRoll-predictedRoll)*DEG)*RAD;
+      pitch=predictedPitch+(1-alpha)*(measuredPitch-predictedPitch);
+      if(Math.abs(Math.cos(pitch))<.08) {roll=measuredRoll;pitch=measuredPitch;}
+    }
+    if(board) board.rotation.set(roll,pitch,0,'ZYX');
+  }
+  if(raw!==null) {
+    const theta=raw*c.asign,rate=sample.g[c.gaxis]*c.gsign;
+    if(!validDt||integrated===null) {integrated=wrap(theta-offset);rateHistory=[];}
+    else integrated+=(previous.rate+rate)*.5*dt;
+    rateHistory.push({t,theta,rate});rateHistory=rateHistory.filter(v=>t-v.t<=.6);
+    trace.push({t,theta:wrap(theta-offset),gyro:integrated,gap:!validDt});trace=trace.filter(v=>t-v.t<=10);
+    previous={t,rate};
+  } else {previous=null;rateHistory=[];integrated=null;}
+  if(upright && !capture) {
+    motion.push(latest);
+    if(motion.length>1200) {upright=null;motion=[];$('tilt').disabled=true;$('suggestStatus').textContent='บันทึกนานเกินไป กรุณาเริ่ม Record upright ใหม่';}
+  }
+  if(capture) {
+    capture.samples.push(latest);
+    if(t-capture.start>=1) finishCapture();
+  }
+  renderValues();consistency();
+}
+function fresh() {return latest && performance.now()/1000-latest.t<.7 && Math.hypot(...latest.a)>.1;}
+function startCapture(kind) {
+  if(!fresh()) {$('suggestStatus').textContent='ต้องมีข้อมูลสดและ sensor ไม่เป็นศูนย์';return;}
+  if(kind==='upright') {upright=null;motion=[];}
+  capture={kind,start:performance.now()/1000,samples:[]};
+  $('upright').disabled=true;$('tilt').disabled=true;$('suggestStatus').textContent='ค้างท่านี้นิ่ง ๆ กำลังเก็บ 1 วินาที…';
+}
+function finishCapture() {
+  const {kind,samples}=capture;capture=null;$('upright').disabled=false;
+  const mean=key=>[0,1,2].map(i=>samples.reduce((sum,s)=>sum+s[key][i],0)/samples.length);
+  const result={a:mean('a'),g:mean('g')};
+  const scatter=Math.max(...samples.map(s=>Math.hypot(...s.a.map((v,i)=>v-result.a[i]))));
+  if(samples.length<7 || scatter>.045 || Math.hypot(...result.a)<.8 || Math.hypot(...result.a)>1.2 || samples.some(s=>Math.hypot(...s.g)>5)) {
+    $('suggestStatus').textContent='ข้อมูลไม่พอ / ยังเคลื่อน / |a| ไม่ใกล้ 1 g กรุณาค้างนิ่งแล้วบันทึกใหม่';$('tilt').disabled=!upright;return;
+  }
+  if(kind==='upright') {
+    upright=result;motion=[samples[samples.length-1]];$('tilt').disabled=false;
+    $('suggestStatus').textContent='บันทึก upright แล้ว → ค่อย ๆ เอียง + 10–20° หยุดนิ่ง แล้วกด Record tilt +';showCandidates();return;
+  }
+  $('tilt').disabled=false;
+  // Preserve the entire motion, including the final hold, for rate correlation.
+  motion.push(...samples);
+  const suggestion=suggest(upright,result,motion);
+  if(suggestion.error) {$('suggestStatus').textContent=suggestion.error;return;}
+  const {n,d,sign,gaxis,gsign,correlation,change}=suggestion;
+  for(const [id,value] of Object.entries({num:n,den:d,asign:sign,gaxis,gsign})) $(id).value=value;
+  offset=angle(upright.a,n,d)*sign;resetPlot();snippet();renderValues();
+  $('offset').textContent='offset '+offset.toFixed(2)+'°';
+  $('suggestStatus').textContent='เลือกแล้ว: Δθ +'+Math.abs(change).toFixed(1)+'° · rate correlation '+correlation.toFixed(2)+' · ตรวจเอียงกลับและเทียบกราฟอีกครั้ง';
+}
+function suggest(base,end,samples) {
+  const candidates=pairs.map(([n,d])=>{
+    const before=angle(base.a,n,d),after=angle(end.a,n,d);
+    return {n,d,before,change:before===null||after===null?0:wrap(after-before)};
+  }).filter(v=>v.before!==null&&Math.abs(v.before)<8&&Math.abs(v.change)>=5&&Math.abs(v.change)<=35).sort((a,b)=>Math.abs(b.change)-Math.abs(a.change));
+  if(!candidates.length) return {error:'ไม่มีคู่ใกล้ 0° ที่เปลี่ยนชัดเจน: ตั้ง upright ใหม่ แล้วเอียง 10–20° เฉพาะแกนสมดุล'};
+  if(candidates[1]&&Math.abs(candidates[1].change)>.8*Math.abs(candidates[0].change)) return {error:'เอียงสองแกนใกล้กันเกินไป กรุณา Record upright ใหม่ แล้วหมุนเฉพาะแกนล้อ'};
+  const {n,d,change}=candidates[0],sign=Math.sign(change),rates=[];
+  for(let i=1;i<samples.length;i++) {
+    const a=samples[i-1],b=samples[i],dt=b.t-a.t,aa=angle(a.a,n,d),ba=angle(b.a,n,d);
+    if(dt<=0||dt>.35||aa===null||ba===null) continue;
+    const rate=sign*wrap(ba-aa)/dt;
+    if(Math.abs(rate)>2) rates.push({rate,g:a.g.map((v,j)=>(v+b.g[j])/2-base.g[j]),dt});
+  }
+  const ranked=[0,1,2].map(axis=>{
+    let dot=0,aa=0,gg=0,time=0;
+    for(const r of rates) {dot+=r.rate*r.g[axis]*r.dt;aa+=r.rate*r.rate*r.dt;gg+=r.g[axis]*r.g[axis]*r.dt;time+=r.dt;}
+    const corr=aa&&gg?dot/Math.sqrt(aa*gg):0,rms=time?Math.sqrt(gg/time):0;
+    return {axis,corr,rms,score:Math.abs(corr)*rms,time};
+  }).sort((a,b)=>b.score-a.score);
+  const best=ranked[0];
+  if(rates.length<4||best.time<.35||best.rms<2||Math.abs(best.corr)<.65||ranked[1].score>.8*best.score) return {error:'gyro ยังไม่ชัดหรือข้อมูล motion ขาด: เริ่ม Record upright ใหม่ แล้วเอียงช้า ๆ ต่อเนื่อง 1–3 วินาที'};
+  return {n,d,sign,gaxis:best.axis,gsign:Math.sign(best.corr),correlation:Math.abs(best.corr),change};
+}
+for(const id of ['num','den','asign','gaxis','gsign']) $(id).addEventListener('change',()=>{offset=0;$('offset').textContent='offset 0.00°';resetPlot();snippet();renderValues();$('consistency').textContent='เปลี่ยนค่าแล้ว รอการเคลื่อนไหวใหม่';});
+$('zero').onclick=()=>{const c=selection(),v=latest?angle(latest.a,c.num,c.den):null;if(!fresh()||v===null)return;offset=v*c.asign;$('offset').textContent='offset '+offset.toFixed(2)+'°';resetPlot();renderValues();};
+$('upright').onclick=()=>startCapture('upright');$('tilt').onclick=()=>startCapture('tilt');
+function resetSource() {latest=null;upright=null;motion=[];capture=null;offset=0;orientationReady=false;resetPlot();$('offset').textContent='offset 0.00°';$('upright').disabled=false;$('tilt').disabled=true;$('suggestStatus').textContent='เริ่ม Record upright เพื่อเก็บการเคลื่อนไหวใหม่';showCandidates();}
+function buttons() {$('connect').disabled=!!port||!!demoTimer||closing||!navigator.serial;$('disconnect').disabled=(!port&&!demoTimer)||closing;$('demo').disabled=!!port||closing;$('demo').textContent=demoTimer?'Stop demo':'Demo';}
+async function disconnect() {
+  if(closing)return;closing=true;buttons();
+  if(demoTimer){clearInterval(demoTimer);demoTimer=null;}
+  try {if(reader)await reader.cancel();if(readTask)await readTask;if(port)await port.close();}
+  catch(error){log('Disconnect: '+error.message);}
+  finally{port=null;reader=null;readTask=null;closing=false;capture=null;$('upright').disabled=false;$('status').textContent='ตัดการเชื่อมต่อแล้ว';buttons();}
+}
+async function readSerial() {
+  const decoder=new TextDecoder();let buffer='';
+  try {
+    reader=port.readable.getReader();
+    while(true) {
+      const {value,done}=await reader.read();if(done)break;
+      buffer+=decoder.decode(value,{stream:true});
+      const lines=buffer.split(/\r\n|\n|\r/);buffer=lines.pop();
+      for(const line of lines){if(!line.trim())continue;log(line);const sample=parseLine(line);if(sample)ingest(sample);}
+      if(buffer.length>8192){log('[discarded oversized line] '+buffer.slice(0,200));buffer='';}
+    }
+  }catch(error){log('Serial: '+error.message);}
+  finally{if(buffer.trim())log(buffer);if(reader){reader.releaseLock();reader=null;}}
+}
+$('connect').onclick=async()=>{
+  $('connect').disabled=true;
+  try{port=await navigator.serial.requestPort();await port.open({baudRate:115200});resetSource();$('status').textContent='Serial · 115200 baud · รอข้อมูล';buttons();readTask=readSerial();await readTask;if(!closing)await disconnect();}
+  catch(error){log('Connect: '+error.message);$('status').textContent='เชื่อมต่อไม่ได้: '+error.message;if(port)try{await port.close();}catch{}port=null;buttons();}
+};
+$('disconnect').onclick=disconnect;
+$('demo').onclick=()=>{
+  if(demoTimer){disconnect();return;}
+  resetSource();const start=performance.now()/1000;
+  // Slow, physically consistent roll: ay=sin(theta), az=cos(theta), gx=dtheta/dt.
+  demoTimer=setInterval(()=>{const t=performance.now()/1000-start,theta=18*Math.sin(t*.45),rate=8.1*Math.cos(t*.45);const line='a=0.000,'+Math.sin(theta*RAD).toFixed(4)+','+Math.cos(theta*RAD).toFixed(4)+'  g='+rate.toFixed(3)+',0,0  | demo';log(line);ingest(parseLine(line));},100);
+  $('status').textContent='Demo · sinusoidal tilt รอบ X ±18°';buttons();
+};
+if(!navigator.serial)$('serialWarning').textContent='เบราว์เซอร์นี้ไม่มี navigator.serial — เปิดไฟล์ด้วย Chrome/Edge บน desktop เพื่อใช้ Web Serial; Demo ยังใช้ได้';
+setInterval(()=>{
+  if(latest&&performance.now()/1000-latest.t>1){$('health').textContent='ข้อมูลหยุด / stale — ค่าสุดท้ายไม่ใช่ข้อมูลสด';$('health').className='bad';$('consistency').textContent='ไม่มีข้อมูลสดเพื่อเทียบเครื่องหมาย';$('consistency').className='muted';}
+  if(capture&&performance.now()/1000-capture.start>3){capture=null;$('upright').disabled=false;$('tilt').disabled=!upright;$('suggestStatus').textContent='หมดเวลา: ไม่มีข้อมูลพอสำหรับบันทึก กรุณาลองใหม่';}
+},300);
+function drawChart() {
+  const canvas=$('chart'),ctx=canvas.getContext('2d'),ratio=devicePixelRatio||1,w=canvas.clientWidth,h=canvas.clientHeight;
+  if(canvas.width!==Math.round(w*ratio)||canvas.height!==Math.round(h*ratio)){canvas.width=Math.round(w*ratio);canvas.height=Math.round(h*ratio);}
+  ctx.setTransform(ratio,0,0,ratio,0,0);ctx.clearRect(0,0,w,h);
+  const style=getComputedStyle(document.documentElement),left=45,top=15,bottom=h-25,now=performance.now()/1000;
+  const visible=trace.filter(p=>now-p.t<=10),extent=Math.max(10,...visible.flatMap(p=>[Math.abs(p.theta),Math.abs(p.gyro)]))*1.15;
+  const y=v=>top+(extent-v)/(2*extent)*(bottom-top),x=t=>left+(t-now+10)/10*(w-left-8);
+  ctx.font='11px system-ui';ctx.strokeStyle=style.getPropertyValue('--line');ctx.fillStyle=style.getPropertyValue('--muted');
+  for(const v of [-extent,0,extent]){ctx.beginPath();ctx.moveTo(left,y(v));ctx.lineTo(w,y(v));ctx.stroke();ctx.fillText(v.toFixed(0)+'°',3,y(v)+4);}
+  ctx.fillText('−10 s',left,h-5);ctx.fillText('now',w-30,h-5);
+  for(const [key,color] of [['theta',style.getPropertyValue('--accent')],['gyro','#df9eeb']]){
+    ctx.strokeStyle=color;ctx.lineWidth=2;ctx.beginPath();let prev=null;
+    for(const p of visible){if(!prev||p.gap||Math.abs(p[key]-prev[key])>180)ctx.moveTo(x(p.t),y(p[key]));else ctx.lineTo(x(p.t),y(p[key]));prev=p;}ctx.stroke();
+  }
+}
+function initScene() {
+  if(!window.THREE)throw new Error('โหลด three.js ไม่สำเร็จ — ตรวจอินเทอร์เน็ตแล้ว reload (ข้อมูล / Demo / กราฟยังใช้ได้)');
+  const T=THREE,host=$('view'),scene=new T.Scene();scene.background=new T.Color('#101824');
+  const renderer=new T.WebGLRenderer({antialias:true});renderer.setPixelRatio(Math.min(devicePixelRatio||1,2));host.appendChild(renderer.domElement);
+  const camera=new T.PerspectiveCamera(40,1,.01,100);scene.add(new T.HemisphereLight(0xffffff,0x405070,1.5));const light=new T.DirectionalLight(0xffffff,1);light.position.set(1,3,4);scene.add(light);
+  const material=(color)=>new T.MeshStandardMaterial({color,roughness:.55,metalness:.25});
+  const box=(parent,w,h,d,x,y,z,color)=>{const mesh=new T.Mesh(new T.BoxGeometry(w,h,d),material(color));mesh.position.set(x,y,z);parent.add(mesh);return mesh;};
+  function label(parent,text,x,y,z,color='#ffffff') {
+    const canvas=document.createElement('canvas');canvas.width=512;canvas.height=96;const ctx=canvas.getContext('2d');ctx.font='bold 38px sans-serif';ctx.textAlign='center';ctx.fillStyle=color;ctx.fillText(text,256,62);
+    const sprite=new T.Sprite(new T.SpriteMaterial({map:new T.CanvasTexture(canvas),depthTest:false}));sprite.position.set(x,y,z);sprite.scale.set(.3,.056,1);parent.add(sprite);
+  }
+  const ground=new T.Mesh(new T.PlaneGeometry(2,2),material(0x243244));ground.rotation.x=-Math.PI/2;ground.position.y=-.002;scene.add(ground);scene.add(new T.GridHelper(2,20,0x52667f,0x34465c));
+  frame=new T.Group();frame.position.x=.18;scene.add(frame);
+  box(frame,.25,.014,.035,0,.007,0,0xc6d0df);box(frame,.015,.29,.035,-.118,.15,0,0xc6d0df);box(frame,.015,.29,.035,.118,.15,0,0xc6d0df);
+  const wheel=new T.Mesh(new T.CylinderGeometry(.1,.1,.014,64),material(0x48babb));wheel.rotation.x=Math.PI/2;wheel.position.set(0,.17,.012);frame.add(wheel);
+  const hub=new T.Mesh(new T.CylinderGeometry(.018,.018,.04,24),material(0xe7edf5));hub.rotation.x=Math.PI/2;hub.position.copy(wheel.position);frame.add(hub);
+  for(let i=0;i<6;i++){const spoke=box(frame,.075,.004,.004,0,0,.022,0x1d5963);const a=i*Math.PI/3;spoke.position.set(Math.cos(a)*.055,.17+Math.sin(a)*.055,.022);spoke.rotation.z=a;}
+  const line=new T.BufferGeometry().setFromPoints([new T.Vector3(.18,0,-.05),new T.Vector3(.18,.36,-.05)]);scene.add(new T.Line(line,new T.LineDashedMaterial({color:0xf5d680,dashSize:.01,gapSize:.007})));scene.children[scene.children.length-1].computeLineDistances();
+  label(scene,'U-frame / 20 cm',.18,.4,0);label(scene,'0°',.2,.35,-.05,'#f5d680');
+  // Sensor Z-up convention -> display Y-up. The child holds body roll/pitch.
+  const mount=new T.Group();mount.position.set(-.23,.17,0);mount.rotation.x=-Math.PI/2;scene.add(mount);board=new T.Group();mount.add(board);
+  box(board,.105,.07,.008,0,0,0,0x26785c);box(board,.022,.022,.01,0,0,.009,0x222831);
+  for(let i=0;i<3;i++){const direction=new T.Vector3();direction.setComponent(i,1);const color=[0xff6262,0x65e38c,0x659aff][i];board.add(new T.ArrowHelper(direction,new T.Vector3(0,0,.012),.12,color,.022,.011));const pos=direction.clone().multiplyScalar(.15);label(board,axes[i].toUpperCase(),pos.x,pos.y,pos.z,'#'+color.toString(16));}
+  label(scene,'MPU-6050',-.23,.4,0);
+  let azimuth=0,elevation=.22,distance=1.15,drag=null;const target=new T.Vector3(0,.17,0);
+  host.addEventListener('pointerdown',e=>{drag={x:e.clientX,y:e.clientY};host.setPointerCapture(e.pointerId);});
+  host.addEventListener('pointermove',e=>{if(!drag)return;azimuth-=(e.clientX-drag.x)*.007;elevation=Math.max(.03,Math.min(1.35,elevation+(e.clientY-drag.y)*.007));drag={x:e.clientX,y:e.clientY};});
+  for(const event of ['pointerup','pointercancel','lostpointercapture'])host.addEventListener(event,()=>drag=null);
+  host.addEventListener('wheel',e=>{e.preventDefault();distance=Math.max(.55,Math.min(3,distance*Math.exp(e.deltaY*.001)));},{passive:false});
+  host.addEventListener('dblclick',()=>{azimuth=0;elevation=.22;distance=1.15;});
+  const resize=new ResizeObserver(()=>{renderer.setSize(host.clientWidth,host.clientHeight,false);camera.aspect=host.clientWidth/host.clientHeight;camera.updateProjectionMatrix();});resize.observe(host);
+  return ()=>{camera.position.set(target.x+distance*Math.sin(azimuth)*Math.cos(elevation),target.y+distance*Math.sin(elevation),target.z+distance*Math.cos(azimuth)*Math.cos(elevation));camera.lookAt(target);renderer.render(scene,camera);};
+}
+let renderScene=()=>{};try{renderScene=initScene();}catch(error){$('sceneError').textContent=error.message;}
+function animate(){requestAnimationFrame(animate);renderScene();drawChart();}
+snippet();showCandidates();buttons();animate();
+</script></body></html>

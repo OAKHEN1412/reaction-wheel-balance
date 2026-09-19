@@ -5,7 +5,7 @@
 // timescales) with a gyro rate integration (smooth short-term, drifts long
 // term) into a single tilt angle estimate.
 // =============================================================================
-#include <cmath>
+#include <math.h>
 
 class ComplementaryFilter {
 public:
@@ -37,5 +37,5 @@ private:
 // tilt plane, via atan2(num, den). When upright, den should read close to
 // +1 g and num close to 0 g.
 inline float accelTiltAngle(float num, float den) {
-  return std::atan2(num, den);
+  return atan2f(num, den);
 }

@@ -45,6 +45,9 @@ NOMINAL = dict(
                         #   0.7 = ล้อพิมพ์ 3D ที่มีเนื้อวัสดุกระจุกออกไปทางขอบ (มี spoke เว้นกลาง)
 
     # --- เฟรม + มอเตอร์ + แบต + บอร์ด ---
+    # TODO: ตัวเลขนี้ยังเป็นค่าประมาณตั้งแต่ก่อนเปลี่ยนคอนโทรลเลอร์ -- Arduino Mega 2560
+    # (~101.5x53.3mm, ~37g) หนักและใหญ่กว่า ESP32-C3 Super Mini เดิม (~22x18mm, ~2g) มาก
+    # ต้องชั่ง/วัด COM ของเฟรมใหม่หลังติดตั้ง Mega จริงแล้วค่อยอัปเดต m_b/l_b ที่นี่
     m_b=0.7,            # kg, มวลรวมของทุกอย่างยกเว้นล้อ
     l_b=0.11,           # m, ความสูง pivot -> CM ของเฟรม
     k_b=0.25,           # shape factor: I_b(own) = k_b * m_b * l_b^2
@@ -59,12 +62,15 @@ NOMINAL = dict(
     # แรงบิดโน้มถ่วง (ไม่งั้นล้อ "แพ้" แรงโน้มถ่วง ไล่ตามไม่ทันแม้เกนจะจูนดีแค่ไหนก็ตาม)
     # -> เลือก nominal gear_ratio และ tau_stall_motor ไปทาง "แรงบิดสูง" ของช่วงที่เป็นไปได้
     #    (แลกกับความเร็วสูงสุดที่ลดลง) เพื่อให้มี margin ใช้งานได้จริงที่จุดออกแบบหลัก
-    gear_ratio=2.5,     # อัตราทด มอเตอร์:ล้อ (ช่วง 1-3 แต่เลือกสูงหน่อยเพื่อแรงบิด)
-    motor_no_load_rpm=4000.0,   # rpm ที่แกนมอเตอร์ (ไม่มีโหลด, 12V)
+    gear_ratio=6.0,     # อัตราทด มอเตอร์:ล้อ -- วัดจริง 2026-09-19 (ล้อ 1 รอบ = มอเตอร์ 6 รอบ)
+    motor_no_load_rpm=3500.0,   # rpm ที่แกนมอเตอร์ (ไม่มีโหลด, 12V)
     tau_stall_motor=0.09,       # N*m ที่แกนมอเตอร์ (BLDC-3640 เล็ก, ประมาณ 0.05-0.1, เลือกค่อนสูง)
     gear_eff=0.85,      # ประสิทธิภาพเกียร์/สายพาน
 
-    tau_m=0.06,         # s, time constant ลูปความเร็วมอเตอร์+ไดรเวอร์ภายใน (ประมาณ, สวีป 0.02-0.15)
+    control_mode="voltage",
+    tau_m_est=0.18,     # controller estimate; independent of plant tau_m
+    coast_decel_frac=1.0, # same-direction deceleration including zero duty
+    tau_m=0.18,         # s, measured light-wheel mechanical time constant, range 0.12-0.25
 
     # --- เซนเซอร์ ---
     comp_alpha=0.98,    # complementary filter alpha (ให้น้ำหนักไจโร)
@@ -74,7 +80,7 @@ NOMINAL = dict(
     omega_w_noise_std=0.5,   # rad/s, สัญญาณรบกวนการวัดความเร็วล้อจาก FG tach
     omega_w_quant=1.0,       # rad/s, ขั้นควอนไทซ์ของ FG tach (ความละเอียดจำกัด)
 
-    dt_ctrl=0.002,      # s, รอบลูปควบคุม (500 Hz ตามที่ระบุ ESP32-C3)
+    dt_ctrl=0.002,      # s, รอบลูปควบคุม (500 Hz ตามที่ระบุ, รันบน Arduino Mega 2560)
     ctrl_delay_samples=1,  # 1 sample delay (คำนวณ a จากค่าที่วัดได้ในรอบก่อนหน้า)
 )
 
@@ -88,10 +94,10 @@ RANGES = dict(
     l_b=(0.08, 0.15),
     k_b=(0.15, 0.4),
     l_w=(0.10, 0.18),
-    gear_ratio=(1.0, 3.0),
+    gear_ratio=(5.5, 6.5),  # วัดแล้ว = 6 (เผื่อความคลาดเคลื่อนการนับ)
     tau_stall_motor=(0.05, 0.10),
     gear_eff=(0.75, 0.95),
-    tau_m=(0.02, 0.15),
+    tau_m=(0.12, 0.25),
     gyro_noise_std=(0.005, 0.03),
     gyro_bias_std=(0.0, 0.02),
     accel_noise_std=(0.005, 0.03),
@@ -115,6 +121,12 @@ def derive(p: dict) -> dict:
                                             ล้อรอบแกนตัวเอง)
         B = (m_b*l_b + m_w*l_w) * g       (สัมประสิทธิ์แรงบิดโน้มถ่วงที่ทำให้ล้ม, ไม่เสถียร)
     """
+    if p.get("control_mode", "voltage") not in ("voltage", "speed"):
+        raise ValueError("control_mode must be voltage or speed")
+    if not 0 < p.get("coast_decel_frac", 1.0) <= 1:
+        raise ValueError("coast_decel_frac must be in (0, 1]")
+    if p["tau_m"] <= 0 or p.get("tau_m_est", 0.18) <= 0:
+        raise ValueError("motor time constants must be positive")
     out = dict(p)
     R_w = p["R_w"]
     I_w = p["k_w"] * p["m_w"] * R_w ** 2

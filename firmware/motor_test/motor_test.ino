@@ -1,149 +1,99 @@
 // =============================================================================
-// motor_test.ino -- standalone interactive tool to discover BLDC-3640 driver
-// polarity: PWM_INVERT, DIR_CW_LEVEL, BRAKE_ACTIVE_LEVEL, FG_PULSES_PER_REV.
+// motor_test.ino -- interactive BLDC-3640 bring-up tool for the Arduino Mega
+// 2560 (the project controller since 2026-09-19). The driver's DIR/BRAKE inputs
+// are 5V logic with strong (~1k) pull-ups, which the Mega's 5V pins drive
+// directly. (The old ESP32-C3 version is in firmware/legacy_esp32/.)
 //
-// SAFETY: secure/clamp the wheel or keep it clear of anything it could hit
-// before commanding nonzero duty -- direction/brake polarity is unknown at
-// this point, so behaviour is unpredictable until you've characterized it.
+// Findings on the real motor (2026-09-19), wire colour -> function:
+//   red   +12V            black  GND
+//   blue  PWM speed       INVERTED: pin HIGH = stopped, starts at ~10% duty
+//   yellow FG             open-collector speed pulses
+//   white DIR             HIGH/floating = CCW, LOW = CW (seen from wheel face);
+//                         can change while powered (motor stopped first)
+//   green BRAKE           HIGH/floating = run, LOW = brake/stop
 //
-// Serial @115200. Commands:
-//   duty <0-1023>   raw PWM duty on PIN_PWM (no inversion assumed -- you are
-//                    discovering PWM_INVERT here: try duty=0 and duty=1023
-//                    and see which one actually spins the motor faster).
-//   dir <0|1>        raw level on PIN_DIR (note which physical rotation
-//                    direction each level produces -- that tells you
-//                    DIR_CW_LEVEL).
-//   brake <0|1>      raw level on PIN_BRAKE (find which level actually
-//                    stops/holds the shaft -- that's BRAKE_ACTIVE_LEVEL).
-//   stop             sets duty to 0 (keeps dir/brake levels as-is).
-//   count            print FG pulses since the last reset, then reset the
-//                    counter -- rotate the wheel BY HAND exactly one full
-//                    revolution, then run this to read off FG_PULSES_PER_REV.
-//   resetcount       reset the FG pulse counter without printing.
-//   status           print current dir/brake levels, duty, live FG rpm.
-//   coastdown <duty> <brakeLevelForPhaseC>
-//                    Spins up to <duty>, then measures how long the FG rpm
-//                    takes to drop to 50% of its spun-up value under three
-//                    conditions: (a) duty=0 coast, (b) duty halved, (c) the
-//                    brake pin driven to <brakeLevelForPhaseC> (run this
-//                    AFTER you already know which brake level stops the
-//                    shaft, from the 'brake' command). Use the result to
-//                    decide whether to enable ACTIVE_DECEL_BRAKE in the main
-//                    firmware's config.h -- if (a)/(b) are much slower than
-//                    (c), the driver can't brake actively via PWM alone.
-//   help             this message.
+// Wiring (Mega):
+//   D11 -> blue (PWM, Timer1 OC1A, ~15.6 kHz 10-bit)
+//   D7  -> white (DIR)      D6 -> green (BRAKE)
+//   D2  <- yellow (FG, INT0, internal pull-up to 5V)
+//   GND -> common GND (battery -, motor black)
 //
-// Live FG rpm + pulse count are also printed automatically every 500ms.
+// SAFETY: switch the 12V supply OFF before uploading/resetting -- during reset
+// the PWM pin floats and the driver may run the motor.
+//
+// Serial @115200 (newline). Commands:
+//   duty <0-1023>  speed, 0 = stop (inversion handled here)
+//   dir <0|1>      raw level on DIR (0 = LOW = CW, 1 = HIGH = CCW)
+//   brake <0|1>    raw level on BRAKE (0 = LOW = brake, 1 = HIGH = run)
+//   stop           duty 0
+//   count          print + reset FG pulse count (turn wheel 1 rev by hand)
+//   resetcount     reset FG pulse count
+//   status         print state (also auto every 500 ms)
+//   help
 // =============================================================================
 #include <Arduino.h>
 
-// ---- pins (must match the main firmware's config.h) ----
-static const int PIN_PWM = 1;
-static const int PIN_DIR = 2;
-static const int PIN_BRAKE = 3;
-static const int PIN_FG = 4;
+static const uint8_t PIN_PWM = 11;   // OC1A
+static const uint8_t PIN_DIR = 7;
+static const uint8_t PIN_BRAKE = 6;
+static const uint8_t PIN_FG = 2;     // INT0
 
-static const int PWM_FREQ_HZ = 20000;
-static const int PWM_RES_BITS = 10;
-static const int PWM_MAX_DUTY = (1 << PWM_RES_BITS) - 1;
+static const int PWM_MAX_DUTY = 1023;
+static const bool PWM_INVERT = true;
 
 volatile uint32_t pulseCount = 0;
 volatile uint32_t lastPulseMicros = 0;
 volatile uint32_t lastPeriodUs = 0;
 
-void IRAM_ATTR onFgPulse() {
+int currentDuty = 0;
+int currentDirLevel = 1;    // CCW, same as the floating default
+int currentBrakeLevel = 1;  // brake released
+
+void onFgPulse() {
   uint32_t now = micros();
   lastPeriodUs = now - lastPulseMicros;
   lastPulseMicros = now;
   pulseCount++;
 }
 
-int currentDuty = 0;
-int currentDirLevel = 0;
-int currentBrakeLevel = 0;
+void pwmWrite(int duty) {
+  duty = constrain(duty, 0, PWM_MAX_DUTY);
+  OCR1A = PWM_INVERT ? (PWM_MAX_DUTY - duty) : duty;
+}
+
+void setupPwm() {
+  // Timer1 fast PWM, 10-bit (TOP = 0x3FF), no prescaler -> 16 MHz / 1024 = 15.6 kHz
+  pinMode(PIN_PWM, OUTPUT);
+  TCCR1A = _BV(COM1A1) | _BV(WGM11) | _BV(WGM10);
+  TCCR1B = _BV(WGM12) | _BV(CS10);
+  pwmWrite(0);
+}
 
 float readRpmRaw() {
-  uint32_t nowMicros = micros();
-  uint32_t lastPulse, period;
   noInterrupts();
-  lastPulse = lastPulseMicros;
-  period = lastPeriodUs;
+  uint32_t lastPulse = lastPulseMicros;
+  uint32_t period = lastPeriodUs;
   interrupts();
   if (period == 0) return 0.0f;
-  if ((uint32_t)(nowMicros - lastPulse) > 300000UL) return 0.0f;
-  // Reports raw electrical pulse rate in "pulses/min" divided by a nominal
-  // guess of 6 pulses/rev -- ONLY for a rough live sanity check; use the
-  // 'count' command + hand-turning one revolution for the real PPR.
-  float pulsesPerSec = 1000000.0f / (float)period;
-  return (pulsesPerSec * 60.0f) / 6.0f;
+  if ((uint32_t)(micros() - lastPulse) > 300000UL) return 0.0f;
+  // Rough live check assuming 6 pulses/rev -- use 'count' for the real PPR.
+  return (1000000.0f / (float)period) * 60.0f / 6.0f;
 }
 
 void printStatus() {
   noInterrupts();
   uint32_t count = pulseCount;
   interrupts();
-  Serial.printf("status: duty=%d/%d dir=%d brake=%d fg_pulses=%lu fg_rpm(assuming 6ppr)=%.1f\n",
-                currentDuty, PWM_MAX_DUTY, currentDirLevel, currentBrakeLevel,
-                (unsigned long)count, readRpmRaw());
-}
-
-// Spins up to testDuty (duty must already be safe to run -- direction is
-// whatever was last set via 'dir'), waits to stabilize, and returns the
-// resulting FG rpm reading as a decay baseline.
-float coastdownSpinUpAndBaseline(int testDuty) {
-  digitalWrite(PIN_BRAKE, currentBrakeLevel);
-  ledcWrite(PIN_PWM, testDuty);
-  delay(1500); // let speed stabilize
-  return readRpmRaw();
-}
-
-// Polls FG rpm until it drops to <= baseline*0.5, or times out. Returns
-// elapsed ms, or -1 on timeout.
-long coastdownMeasureDecayMs(float baseline, uint32_t timeoutMs) {
-  if (baseline <= 0.0f) return -1;
-  float target = baseline * 0.5f;
-  uint32_t t0 = millis();
-  while ((uint32_t)(millis() - t0) < timeoutMs) {
-    if (readRpmRaw() <= target) return (long)(millis() - t0);
-    delay(20);
-  }
-  return -1;
-}
-
-void runCoastdown(int testDuty, int brakeLevelC) {
-  testDuty = constrain(testDuty, 1, PWM_MAX_DUTY);
-  Serial.printf("coastdown: spin to duty=%d, testing decay-to-50%% under coast / half-duty / brake(level=%d)\n",
-                testDuty, brakeLevelC);
-
-  // (a) coast: duty -> 0
-  float base = coastdownSpinUpAndBaseline(testDuty);
-  Serial.printf("  baseline rpm(6ppr,est)=%.1f\n", base);
-  ledcWrite(PIN_PWM, 0);
-  currentDuty = 0;
-  long tCoast = coastdownMeasureDecayMs(base, 5000);
-  Serial.printf("  A) coast (duty=0):            %s\n",
-                tCoast < 0 ? "did not reach 50%% within 5s" : (String("t=") + tCoast + "ms").c_str());
-
-  // (b) half duty
-  base = coastdownSpinUpAndBaseline(testDuty);
-  int halfDuty = testDuty / 2;
-  ledcWrite(PIN_PWM, halfDuty);
-  currentDuty = halfDuty;
-  long tHalf = coastdownMeasureDecayMs(base, 5000);
-  Serial.printf("  B) half duty (duty=%d):        %s\n", halfDuty,
-                tHalf < 0 ? "did not reach 50%% within 5s" : (String("t=") + tHalf + "ms").c_str());
-
-  // (c) brake
-  base = coastdownSpinUpAndBaseline(testDuty);
-  ledcWrite(PIN_PWM, 0);
-  currentDuty = 0;
-  digitalWrite(PIN_BRAKE, brakeLevelC);
-  currentBrakeLevel = brakeLevelC;
-  long tBrake = coastdownMeasureDecayMs(base, 5000);
-  Serial.printf("  C) brake (level=%d):            %s\n", brakeLevelC,
-                tBrake < 0 ? "did not reach 50%% within 5s" : (String("t=") + tBrake + "ms").c_str());
-
-  Serial.println(F("coastdown: done, motor left braked/stopped"));
+  Serial.print(F("status: duty="));
+  Serial.print(currentDuty);
+  Serial.print(F("/1023 dir="));
+  Serial.print(currentDirLevel);
+  Serial.print(F(" brake="));
+  Serial.print(currentBrakeLevel);
+  Serial.print(F(" fg_pulses="));
+  Serial.print(count);
+  Serial.print(F(" fg_rpm(assuming 6ppr)="));
+  Serial.println(readRpmRaw(), 1);
 }
 
 void handleCommand(String line) {
@@ -151,32 +101,34 @@ void handleCommand(String line) {
   if (line.length() == 0) return;
   int spaceIdx = line.indexOf(' ');
   String cmd = (spaceIdx < 0) ? line : line.substring(0, spaceIdx);
-  String argStr = (spaceIdx < 0) ? String("") : line.substring(spaceIdx + 1);
-  argStr.trim();
-  int argVal = argStr.toInt();
+  int argVal = (spaceIdx < 0) ? 0 : line.substring(spaceIdx + 1).toInt();
 
   if (cmd == "duty") {
     currentDuty = constrain(argVal, 0, PWM_MAX_DUTY);
-    ledcWrite(PIN_PWM, currentDuty);
-    Serial.printf("duty=%d/%d\n", currentDuty, PWM_MAX_DUTY);
+    pwmWrite(currentDuty);
+    Serial.print(F("duty="));
+    Serial.println(currentDuty);
   } else if (cmd == "dir") {
-    currentDirLevel = (argVal != 0) ? 1 : 0;
+    currentDirLevel = argVal ? 1 : 0;
     digitalWrite(PIN_DIR, currentDirLevel);
-    Serial.printf("dir=%d (observe rotation direction)\n", currentDirLevel);
+    Serial.print(F("dir="));
+    Serial.println(currentDirLevel ? F("1 (HIGH, expect CCW)") : F("0 (LOW, expect CW)"));
   } else if (cmd == "brake") {
-    currentBrakeLevel = (argVal != 0) ? 1 : 0;
+    currentBrakeLevel = argVal ? 1 : 0;
     digitalWrite(PIN_BRAKE, currentBrakeLevel);
-    Serial.printf("brake=%d (observe whether shaft stops/holds)\n", currentBrakeLevel);
+    Serial.print(F("brake="));
+    Serial.println(currentBrakeLevel ? F("1 (HIGH, released)") : F("0 (LOW, braking)"));
   } else if (cmd == "stop") {
     currentDuty = 0;
-    ledcWrite(PIN_PWM, 0);
+    pwmWrite(0);
     Serial.println(F("duty=0"));
   } else if (cmd == "count") {
     noInterrupts();
     uint32_t c = pulseCount;
     pulseCount = 0;
     interrupts();
-    Serial.printf("FG pulses since last reset: %lu  (this should equal FG_PULSES_PER_REV if you turned exactly one revolution by hand)\n", (unsigned long)c);
+    Serial.print(F("FG pulses since last reset: "));
+    Serial.println(c);
   } else if (cmd == "resetcount") {
     noInterrupts();
     pulseCount = 0;
@@ -184,13 +136,8 @@ void handleCommand(String line) {
     Serial.println(F("pulse count reset"));
   } else if (cmd == "status") {
     printStatus();
-  } else if (cmd == "coastdown") {
-    int sp = argStr.indexOf(' ');
-    int testDuty = (sp < 0) ? argStr.toInt() : argStr.substring(0, sp).toInt();
-    int brakeLevelC = (sp < 0) ? 1 : argStr.substring(sp + 1).toInt();
-    runCoastdown(testDuty, brakeLevelC);
   } else if (cmd == "help") {
-    Serial.println(F("duty <0-1023> | dir <0|1> | brake <0|1> | stop | count | resetcount | status | coastdown <duty> <brakeLevelForPhaseC> | help"));
+    Serial.println(F("duty <0-1023> | dir <0|1> | brake <0|1> | stop | count | resetcount | status | help"));
   } else {
     Serial.println(F("unknown command, try 'help'"));
   }
@@ -198,7 +145,20 @@ void handleCommand(String line) {
 
 String serialBuf;
 
-void pollSerial() {
+void setup() {
+  setupPwm();  // first, so the motor is commanded to stop as early as possible
+  pinMode(PIN_DIR, OUTPUT);
+  pinMode(PIN_BRAKE, OUTPUT);
+  digitalWrite(PIN_DIR, currentDirLevel);
+  digitalWrite(PIN_BRAKE, currentBrakeLevel);
+  pinMode(PIN_FG, INPUT_PULLUP);
+  attachInterrupt(digitalPinToInterrupt(PIN_FG), onFgPulse, FALLING);
+
+  Serial.begin(115200);
+  Serial.println(F("motor_test: BLDC-3640 bring-up tool. Type 'help'."));
+}
+
+void loop() {
   while (Serial.available() > 0) {
     char c = (char)Serial.read();
     if (c == '\n' || c == '\r') {
@@ -206,38 +166,14 @@ void pollSerial() {
         handleCommand(serialBuf);
         serialBuf = "";
       }
-    } else {
+    } else if (serialBuf.length() < 63) {
       serialBuf += c;
-      if (serialBuf.length() > 63) serialBuf = "";
     }
   }
-}
-
-void setup() {
-  Serial.begin(115200);
-  delay(300);
-  Serial.println(F("motor_test: BLDC polarity discovery tool"));
-  Serial.println(F("Secure/clamp the wheel before commanding nonzero duty. Type 'help'."));
-
-  pinMode(PIN_DIR, OUTPUT);
-  pinMode(PIN_BRAKE, OUTPUT);
-  pinMode(PIN_FG, INPUT_PULLUP);
-  digitalWrite(PIN_DIR, LOW);
-  digitalWrite(PIN_BRAKE, LOW);
-
-  ledcAttach(PIN_PWM, PWM_FREQ_HZ, PWM_RES_BITS);
-  ledcWrite(PIN_PWM, 0);
-
-  attachInterrupt(digitalPinToInterrupt(PIN_FG), onFgPulse, FALLING);
-}
-
-void loop() {
-  pollSerial();
 
   static uint32_t lastPrint = 0;
-  uint32_t now = millis();
-  if (now - lastPrint >= 500) {
-    lastPrint = now;
+  if (millis() - lastPrint >= 500) {
+    lastPrint = millis();
     printStatus();
   }
 }

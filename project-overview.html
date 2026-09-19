@@ -159,7 +159,7 @@ footer{margin-top:48px;padding-top:14px;border-top:1px solid var(--line);font-si
 <div class="wrap">
 <header>
   <div>
-    <div class="label">Control systems project · ESP32-C3 · MPU-6050 · BLDC-3640</div>
+    <div class="label">Control systems project · Arduino Mega 2560 · MPU-6050 · BLDC-3640</div>
     <h1>Reaction Wheel <span>Balance</span></h1>
     <p class="lede">โครงตัว U ที่ทรงตัวบนขอบฐานด้วยล้อเหวี่ยง 20 cm — เร่งหรือชะลอล้อเพื่อสร้างแรงบิดปฏิกิริยาดันโครงกลับสู่แนวตั้ง อ่านมุมจาก IMU แล้วคำนวณคำสั่งมอเตอร์ที่ 500 Hz</p>
   </div>
@@ -189,8 +189,8 @@ footer{margin-top:48px;padding-top:14px;border-top:1px solid var(--line);font-si
   <div class="sec-head"><span class="label">Hardware</span><h2>อุปกรณ์ที่ใช้จริง</h2></div>
   <div class="parts">
     <article class="part">
-      <div class="ph"><img src="assets/modules/esp32c3.jpg" alt="บอร์ด ESP32-C3 Super Mini พอร์ต USB-C"></div>
-      <div class="bd"><h3>ESP32-C3 Super Mini</h3><p>สมองของระบบ รันลูปควบคุม 500 Hz · ลอจิก 3.3 V · รับไฟ 5 V</p><span class="pins">GPIO1–4 มอเตอร์ · GPIO8/9 I²C</span></div>
+      <div class="ph"><img src="assets/modules/esp32c3.jpg" alt="บอร์ด ESP32-C3 Super Mini (คอนโทรลเลอร์รุ่นเดิม ถูกแทนที่แล้ว)"></div>
+      <div class="bd"><h3>Arduino Mega 2560</h3><p>สมองของระบบ รันลูปควบคุม 500 Hz · ลอจิก 5 V · รับไฟ VIN ตรงจากแบต 12 V · เปลี่ยนจาก ESP32-C3 เมื่อ 2026-09-19 (ยังไม่มีรูปจริง รูปด้านซ้ายเป็นบอร์ดรุ่นเดิม)</p><span class="pins">D11 PWM · D7 DIR · D6 BRAKE · D2 FG · D20/D21 I²C</span></div>
     </article>
     <article class="part">
       <div class="ph"><img src="assets/modules/mpu6050.jpg" alt="โมดูล MPU-6050 GY-521 พร้อมขา header"></div>
@@ -201,15 +201,15 @@ footer{margin-top:48px;padding-top:14px;border-top:1px solid var(--line);font-si
       <div class="bd"><h3>BLDC-3640</h3><p>มอเตอร์ไร้แปรงถ่าน 12 VDC 4000 rpm มีไดรเวอร์ในตัว สาย 6 เส้น ขับล้อผ่านเฟือง</p><span class="pins">PWM→1 · F/R→2 · BRAKE→3 · FG→4</span></div>
     </article>
     <article class="part">
-      <div class="ph"><img src="assets/modules/aa451.jpg" alt="โมดูลลดแรงดัน AA451 พร้อมจอแสดงผลแรงดัน 3 หลัก"></div>
-      <div class="bd"><h3>AA451 Step-down</h3><p>XL4015 · รับ 4–38 V ออก 1.25–36 V 5 A มีจอโวลต์ · ตั้งให้ได้ 5.0 V ก่อนต่อบอร์ด</p><span class="pins">IN 12 V → OUT 5 V → ESP32 5V</span></div>
+      <div class="ph"><img src="assets/modules/aa451.jpg" alt="โมดูลลดแรงดัน AA451 พร้อมจอแสดงผลแรงดัน 3 หลัก (ไม่ใช้แล้วในวงจรปัจจุบัน)"></div>
+      <div class="bd"><h3>AA451 Step-down <span class="flag">ไม่ใช้แล้ว</span></h3><p>XL4015 · รับ 4–38 V ออก 1.25–36 V 5 A · ซื้อไว้ตอนออกแบบกับ ESP32-C3 แต่ Arduino Mega รับ VIN 12 V ตรงได้เลย (onboard regulator) จึงไม่ต้องใช้ตัวนี้อีก</p><span class="pins">เดิม: IN 12 V → OUT 5 V → ESP32 5V</span></div>
     </article>
     <article class="part">
       <div class="ph"><img src="assets/modules/battery12v.jpg" alt="แบตเตอรี่ลิเธียม 12V แพ็ค 18650 หลายขนาด พร้อมสาย DC"></div>
       <div class="bd"><h3>แบต Li-ion 12 V (DC120-5203M)</h3><p>แพ็ค 18650 แบบ 3S มี BMS + ที่ชาร์จ 1 A · ห้ามใช้จนแรงดันต่ำกว่า 9 V</p><span class="pins">+12 V → สวิตช์ → ฟิวส์ 3 A</span></div>
     </article>
   </div>
-  <p style="font-size:.82rem;color:var(--ink-2)">รูปจากหน้าร้านที่สั่งซื้อตามไฟล์ <code>raction module.xlsx</code> (ร้าน โอ.อาร์. เทคโนโลยี และ Shopee) — รูป ESP32 และแบตในสไลด์เดิมไม่ตรงรุ่นที่ใช้จริง (สไลด์เป็นบอร์ด DevKit และแบต 24 V)</p>
+  <p style="font-size:.82rem;color:var(--ink-2)">รูปจากหน้าร้านที่สั่งซื้อตามไฟล์ <code>raction module.xlsx</code> (ร้าน โอ.อาร์. เทคโนโลยี และ Shopee) — รูป ESP32 และแบตในสไลด์เดิมไม่ตรงรุ่นที่ใช้จริง (สไลด์เป็นบอร์ด DevKit และแบต 24 V) · คอนโทรลเลอร์เปลี่ยนจาก ESP32-C3 เป็น Arduino Mega 2560 ถาวรเมื่อ 2026-09-19 (ยังไม่มีรูปโมดูล Mega จริงในชุดนี้)</p>
 
   <h3>โครงสร้างที่ออกแบบ (Fusion)</h3>
   <div class="cad">
@@ -266,7 +266,7 @@ footer{margin-top:48px;padding-top:14px;border-top:1px solid var(--line);font-si
       <path class="d-fb" d="M860 112 V160 H505 V128" marker-end="url(#ah2)"/>
       <text class="d-s" x="640" y="154">FG → ความเร็วล้อ ω</text>
     </svg>
-    <figcaption>ลูปทำงานที่ 500 Hz บน ESP32-C3 · เส้นประสีแดงคือสัญญาณป้อนกลับ</figcaption>
+    <figcaption>ลูปทำงานที่ 500 Hz บน Arduino Mega 2560 · เส้นประสีแดงคือสัญญาณป้อนกลับ</figcaption>
   </div>
   <div class="two">
     <div style="display:grid;gap:14px">
@@ -280,22 +280,22 @@ footer{margin-top:48px;padding-top:14px;border-top:1px solid var(--line);font-si
 <section id="wiring">
   <div class="sec-head"><span class="label">Wiring</span><h2>การต่อวงจร</h2></div>
   <figure class="figure" style="margin:0">
-    <img src="hardware/schematic.png" alt="แผนผังวงจร: แบตเตอรี่ 12V ผ่านสวิตช์และฟิวส์ ไปมอเตอร์ BLDC และบั๊กคอนเวอร์เตอร์ 5V ที่เลี้ยง ESP32-C3 ซึ่งต่อกับ MPU-6050 และสายควบคุมมอเตอร์">
+    <img src="hardware/schematic.png" alt="แผนผังวงจร: แบตเตอรี่ 12V ผ่านสวิตช์และฟิวส์ ไปมอเตอร์ BLDC และเข้าขา VIN ของ Arduino Mega 2560 โดยตรง ซึ่งต่อกับ MPU-6050 และสายควบคุมมอเตอร์">
     <figcaption>ไฟล์ต้นฉบับ <code>hardware/schematic.svg</code> · รายละเอียดเต็มใน <code>hardware/wiring.md</code></figcaption>
   </figure>
   <div class="tbl">
     <table>
-      <thead><tr><th>สัญญาณ</th><th>ESP32-C3</th><th>สาย / ขา</th><th>หมายเหตุ</th></tr></thead>
+      <thead><tr><th>สัญญาณ</th><th>Mega 2560</th><th>สาย / ขา</th><th>หมายเหตุ</th></tr></thead>
       <tbody>
-        <tr><td>I²C SDA</td><td class="mono">GPIO8</td><td>MPU SDA</td><td>ขาบูต — pull-up บนโมดูลช่วยให้บูตปกติ</td></tr>
-        <tr><td>I²C SCL</td><td class="mono">GPIO9</td><td>MPU SCL</td><td>ขา BOOT — ห้ามดึงลง GND ตอนเปิดเครื่อง</td></tr>
-        <tr><td>IMU INT</td><td class="mono">GPIO10</td><td>MPU INT</td><td>ไม่บังคับ</td></tr>
-        <tr><td>ความเร็วมอเตอร์</td><td class="mono">GPIO1</td><td><span class="wire"><i style="background:#2F6FD6"></i>น้ำเงิน · PWM</span></td><td>20 kHz · 10-bit</td></tr>
-        <tr><td>ทิศทาง</td><td class="mono">GPIO2</td><td><span class="wire"><i style="background:#D9B21B"></i>เหลือง · F/R</span></td><td><span class="flag">ขาบูต</span> ถ้าบอร์ดบูตไม่ขึ้น ย้ายไป GPIO5/6/7</td></tr>
-        <tr><td>เบรก</td><td class="mono">GPIO3</td><td><span class="wire"><i style="background:#E07B1F"></i>ส้ม · BRAKE</span></td><td>ขั้วสัญญาณต้องหาด้วย <code>motor_test</code></td></tr>
-        <tr><td>ความเร็วล้อ</td><td class="mono">GPIO4</td><td><span class="wire"><i style="background:#2F9E55"></i>เขียว · FG</span></td><td><b>ต้องมี pull-up 4.7–10 kΩ ไป 3V3</b></td></tr>
+        <tr><td>I²C SDA</td><td class="mono">D20</td><td>MPU SDA</td><td>fixed I²C pins บน Mega · pull-up ในตัวบอร์ดไป 5V</td></tr>
+        <tr><td>I²C SCL</td><td class="mono">D21</td><td>MPU SCL</td><td>ไม่ใช่ strapping pin เหมือน ESP32 — ไม่มีข้อจำกัดเรื่อง boot</td></tr>
+        <tr><td>IMU INT</td><td class="mono">D3</td><td>MPU INT</td><td>ไม่บังคับ</td></tr>
+        <tr><td>ความเร็วมอเตอร์</td><td class="mono">D11</td><td><span class="wire"><i style="background:#2F6FD6"></i>น้ำเงิน · PWM</span></td><td>~15.6 kHz · 10-bit · กลับขั้ว (HIGH = หยุด)</td></tr>
+        <tr><td>ทิศทาง</td><td class="mono">D7</td><td><span class="wire"><i style="background:#B0B0B0"></i>ขาว · DIR</span></td><td>LOW = CW · ต่อตรงจาก Mega ได้เลย ไม่ต้องมีทรานซิสเตอร์</td></tr>
+        <tr><td>เบรก</td><td class="mono">D6</td><td><span class="wire"><i style="background:#2F9E55"></i>เขียว · BRAKE</span></td><td>LOW = เบรก · ต่อตรง ไม่ต้องมีทรานซิสเตอร์</td></tr>
+        <tr><td>ความเร็วล้อ</td><td class="mono">D2</td><td><span class="wire"><i style="background:#D9B21B"></i>เหลือง · FG</span></td><td>INT0 · ใช้ internal pull-up ของ Mega ไป 5V ได้เลย</td></tr>
         <tr><td>ไฟมอเตอร์</td><td class="mono">—</td><td><span class="wire"><i style="background:#C8352A"></i>แดง / ดำ</span></td><td>12 V ตรงจากแบต ผ่านสวิตช์ + ฟิวส์ 3 A · C 470–1000 µF ใกล้มอเตอร์</td></tr>
-        <tr><td>ไฟบอร์ด</td><td class="mono">5V</td><td>Buck AA451</td><td>ตั้งให้ได้ 5.0 V ด้วยมัลติมิเตอร์ <b>ก่อน</b>ต่อ ESP32 · GND ทุกจุดต่อรวมกัน</td></tr>
+        <tr><td>ไฟบอร์ด</td><td class="mono">VIN</td><td>+12V bus ตรง</td><td>Mega มี onboard regulator แปลง VIN→5V ในตัว <b>ไม่ต้องมี buck converter แยก</b> · GND ทุกจุดต่อรวมกัน</td></tr>
       </tbody>
     </table>
   </div>
@@ -304,12 +304,12 @@ footer{margin-top:48px;padding-top:14px;border-top:1px solid var(--line);font-si
 <section id="bringup">
   <div class="sec-head"><span class="label">Bring-up</span><h2>ขั้นตอนทดสอบกับเครื่องจริง</h2></div>
   <ol class="steps">
-    <li><div><b>ต่อวงจรตาม checklist</b><p>ตั้ง buck ให้ได้ 5.0 V ก่อน · เช็คขั้วแบต · ใส่ pull-up ที่ FG · วัดแรงดันที่ขาควบคุมมอเตอร์ ถ้าเกิน 3.6 V ให้ใส่ R 1 kΩ หรือทรานซิสเตอร์คั่น</p></div></li>
+    <li><div><b>ต่อวงจรตาม checklist</b><p>เช็คขั้วแบต · ต่อ VIN ของ Mega เข้า +12V bus โดยตรง (ห้ามต่อขา 5V) · สายควบคุมมอเตอร์ทั้งหมดต่อตรงจาก Mega ได้เลย ไม่ต้องมี R หรือทรานซิสเตอร์คั่น · <b>ปิดไฟ 12V ก่อนอัปโหลด/รีเซ็ตบอร์ดทุกครั้ง</b> (PWM กลับขั้ว)</p></div></li>
     <li><div><b>แฟลช <code>imu_test</code></b><p>เอียงโครงด้วยมือตามแกนที่ต้องทรงตัว ดูว่าคอลัมน์ไหนเปลี่ยนตาม แล้วตั้ง <code>IMU_ACCEL_AXIS_*</code> / <code>IMU_GYRO_*</code> ใน <code>config.h</code></p></div></li>
     <li><div><b>แฟลช <code>motor_test</code> โดยถอดล้อหรือยึดให้แน่น</b><p>หา <code>PWM_INVERT</code>, <code>DIR_CW_LEVEL</code>, <code>BRAKE_ACTIVE_LEVEL</code> · หมุนแกนมอเตอร์ 1 รอบเพื่อนับจำนวนพัลส์ FG · รัน <code>coastdown</code> เพื่อดูว่าต้องเปิด <code>ACTIVE_DECEL_BRAKE</code> หรือไม่</p></div></li>
     <li><div><b>วัดของจริงแล้วคำนวณเกนใหม่</b><p>มวลโครงและล้อ ความสูงจุดศูนย์ถ่วง ความเฉื่อยล้อ (จาก Fusion Properties) อัตราทด แล้วรัน <code>py -X utf8 sim/design_gains.py --set m_b=… l_b=… --quick</code> และวางบรรทัด <code>#define</code> ที่ได้ลง config.h</p></div></li>
     <li><div><b>แฟลชโค้ดหลัก · <code>zero</code> · เช็คทิศแรงบิดด้วยมือ</b><p>ถือโครงให้แน่นจนสถานะเป็น BALANCING แล้วเอียงเล็กน้อย ล้อต้องดันกลับเข้าแนวตั้ง ถ้าดันไปทางที่เอียงให้พิมพ์ <code>sign -1</code></p></div></li>
-    <li><div><b>วางบนพื้น · <code>tel 1</code> เก็บ CSV · ปรับละเอียด · <code>save</code></b><p>ห้ามจูนแบบเริ่มจาก Kp = 0 — ถ้า Kp ต่ำกว่าค่าขั้นต่ำ ≈ m·g·l / I_w ล้อจะชนะแรงโน้มถ่วงไม่ได้เลย · ค่าที่ save ลง NVS จะทับค่าใน config.h ทุกครั้งที่บูต</p></div></li>
+    <li><div><b>วางบนพื้น · <code>tel 1</code> เก็บ CSV · ปรับละเอียด · <code>save</code></b><p>ห้ามจูนแบบเริ่มจาก Kp = 0 — ถ้า Kp ต่ำกว่าค่าขั้นต่ำ ≈ m·g·l / I_w ล้อจะชนะแรงโน้มถ่วงไม่ได้เลย · ค่าที่ save ลง EEPROM จะทับค่าใน config.h ทุกครั้งที่บูต</p></div></li>
   </ol>
 </section>
 
@@ -348,9 +348,9 @@ footer{margin-top:48px;padding-top:14px;border-top:1px solid var(--line);font-si
 <section id="risks">
   <div class="sec-head"><span class="label">Risks</span><h2>สิ่งที่ต้องระวัง</h2></div>
   <div class="risks">
-    <div class="risk"><h3>ขั้วสัญญาณมอเตอร์ไม่มีเอกสาร</h3><p>PWM อาจกลับขั้ว (duty 0 = เร็วสุด) เบรกอาจ active-low และจำนวนพัลส์ FG ต่อรอบยังไม่รู้ ต้องหาด้วย <code>motor_test</code> ก่อนติดตั้งล้อ</p></div>
-    <div class="risk"><h3>ไดรเวอร์อาจชะลอล้อไม่ได้</h3><p>ไดรเวอร์ราคาถูกมักทำได้แค่ปล่อยไหลเมื่อลด PWM ทำให้แรงบิดสองทิศไม่เท่ากัน ถ้าผล coast-down ช้า ให้เปิด <code>ACTIVE_DECEL_BRAKE</code></p></div>
-    <div class="risk"><h3>แรงดัน 5 V ย้อนเข้าขา ESP32</h3><p>ขาควบคุมของมอเตอร์อาจมี pull-up ภายในไป 5 V ซึ่งเกินพิกัด 3.6 V ของ ESP32 วัดก่อนต่อ ถ้าใช่ให้คั่นด้วย R 1 kΩ หรือทรานซิสเตอร์ open-drain</p></div>
+    <div class="risk"><h3>PWM กลับขั้ว — เสี่ยงมอเตอร์วิ่งตอน reset/upload</h3><p>D11 = HIGH คือหยุด แต่ขาลอยตอน Mega รีเซ็ต/อัปโหลดโค้ด อาจถูกอ่านเป็น LOW แล้วมอเตอร์วิ่ง <b>ต้องปิดไฟ 12V ก่อนอัปโหลด/รีเซ็ตทุกครั้ง</b> แนะนำเพิ่ม pull-up 10 kΩ จาก D11 ไป 5V เป็นเซฟตี้เสริม</p></div>
+    <div class="risk"><h3>ไดรเวอร์อาจชะลอล้อไม่ได้</h3><p>ไดรเวอร์ราคาถูกมักทำได้แค่ปล่อยไหลเมื่อลด PWM ทำให้แรงบิดสองทิศไม่เท่ากัน ถ้าทดสอบด้วยมือแล้วพบว่า coast-down ช้า ให้เปิด <code>ACTIVE_DECEL_BRAKE</code></p></div>
+    <div class="risk"><h3>Polarity ของ PWM/DIR/BRAKE ไม่มีเอกสาร</h3><p>ผู้ผลิต BLDC-3640 ไม่ระบุ logic ของแต่ละขา ต้องยืนยันด้วย <code>motor_test</code> ก่อนติดตั้งล้อทุกครั้งที่เปลี่ยนมอเตอร์</p></div>
     <div class="risk"><h3>ล้อพิมพ์ 3D ที่รอบสูง</h3><p>ล้อ 20 cm ที่ 1,300+ rpm ต้องถ่วงให้สมดุลและขันน็อตแน่น · สวมแว่นตา · ยึดโครงตอนทดสอบครั้งแรก · แบต 3S ห้ามต่ำกว่า 9 V</p></div>
   </div>
 </section>
@@ -363,15 +363,15 @@ footer{margin-top:48px;padding-top:14px;border-top:1px solid var(--line);font-si
       <tbody>
         <tr><td>BLDC-3640 · 12 V 4000 rpm</td><td>ขับล้อเหวี่ยง มีไดรเวอร์ในตัว</td><td class="num">520.00</td></tr>
         <tr><td>DC120-5203M + ที่ชาร์จ 1 A</td><td>แบต Li-ion 12 V มี BMS</td><td class="num">535.00</td></tr>
-        <tr><td>AA451 step-down</td><td>ลดไฟเป็น 5 V ให้บอร์ด</td><td class="num">95.00</td></tr>
+        <tr><td>AA451 step-down <span class="flag">ไม่ใช้แล้ว</span></td><td>ซื้อไว้ตอนแรก — Mega รับ VIN 12 V ตรงได้เลย</td><td class="num">95.00</td></tr>
         <tr><td>MPU-6050 (GY-521)</td><td>วัดมุมเอียง</td><td class="num">90.00</td></tr>
-        <tr><td>ESP32-C3 Super Mini</td><td>ประมวลผลลูปควบคุม</td><td class="num">120.00</td></tr>
+        <tr><td>ESP32-C3 Super Mini <span class="flag">แทนที่แล้ว</span></td><td>ซื้อไว้ตอนแรก — เปลี่ยนเป็น Arduino Mega 2560 (2026-09-19)</td><td class="num">120.00</td></tr>
         <tr><td>งานพิมพ์ 3D</td><td>ล้อเหวี่ยง + โครง</td><td class="num">4,108.80</td></tr>
-        <tr><td><b>รวม</b></td><td></td><td class="num"><b>5,468.80</b></td></tr>
+        <tr><td><b>รวม (ตามรายการซื้อจริงในชีต xlsx)</b></td><td></td><td class="num"><b>5,468.80</b></td></tr>
       </tbody>
     </table>
   </div>
-  <p style="color:var(--ink-2);font-size:.9rem">งบตั้งต้น 10,000 บาท · ใช้ไปแล้ว 2,734.50 บาท · คงเหลือ 7,265.50 บาท ตามชีต 2 (ไม่ตรงกับยอดรวมตารางด้านบน ควรเช็คต้นฉบับ) · อุปกรณ์ที่ต้องซื้อเพิ่ม: สวิตช์, ฟิวส์ 3 A, ตัวเก็บประจุ 470–1000 µF, R 4.7–10 kΩ</p>
+  <p style="color:var(--ink-2);font-size:.9rem">งบตั้งต้น 10,000 บาท · ใช้ไปแล้ว 2,734.50 บาท · คงเหลือ 7,265.50 บาท ตามชีต 2 (ไม่ตรงกับยอดรวมตารางด้านบน ควรเช็คต้นฉบับ) · <b>Arduino Mega 2560 ซื้อเพิ่มภายหลังเพื่อแทน ESP32-C3</b> (ยังไม่มีราคาลงในชีตต้นฉบับ) · อุปกรณ์ที่ต้องซื้อเพิ่ม: MPU-6050 ตัวใหม่ (ตัวเดิมเสีย), สวิตช์, ฟิวส์ 3 A, ตัวเก็บประจุ 470–1000 µF</p>
 </section>
 
 <section id="files">
@@ -383,5 +383,5 @@ footer{margin-top:48px;padding-top:14px;border-top:1px solid var(--line);font-si
   </div>
 </section>
 
-<footer>Desktop\Projects\self-balancing-robot · Arduino core esp32 3.2.1 · FQBN esp32:esp32:esp32c3:CDCOnBoot=cdc</footer>
+<footer>Desktop\Projects\self-balancing-robot · Arduino core avr · FQBN arduino:avr:mega</footer>
 </div>

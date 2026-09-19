@@ -1,0 +1,219 @@
+{
+  "gains": {
+    "lqr": {
+      "Kp": 1137.40301055886,
+      "Kd": 144.30010611092035,
+      "Kw": 1.0000000000000935,
+      "Ki": 0.038666326493045355
+    },
+    "soft": {
+      "Kp": 634.4571428571428,
+      "Kd": 64.97142857142856,
+      "Kw": 1,
+      "Ki": 0.0387
+    }
+  },
+  "rows": [
+    {
+      "gains": "lqr",
+      "tau_m": 0.12,
+      "coast": 1.0,
+      "nominal": {
+        "success": 20,
+        "saturated": 0,
+        "saturation_pct": 0.0
+      },
+      "inertia": {
+        "success": 20,
+        "saturated": 0,
+        "saturation_pct": 0.0
+      }
+    },
+    {
+      "gains": "lqr",
+      "tau_m": 0.12,
+      "coast": 0.3,
+      "nominal": {
+        "success": 20,
+        "saturated": 0,
+        "saturation_pct": 0.0
+      },
+      "inertia": {
+        "success": 20,
+        "saturated": 0,
+        "saturation_pct": 0.0
+      }
+    },
+    {
+      "gains": "lqr",
+      "tau_m": 0.18,
+      "coast": 1.0,
+      "nominal": {
+        "success": 20,
+        "saturated": 0,
+        "saturation_pct": 0.0
+      },
+      "inertia": {
+        "success": 20,
+        "saturated": 0,
+        "saturation_pct": 0.0
+      }
+    },
+    {
+      "gains": "lqr",
+      "tau_m": 0.18,
+      "coast": 0.3,
+      "nominal": {
+        "success": 20,
+        "saturated": 0,
+        "saturation_pct": 0.0
+      },
+      "inertia": {
+        "success": 19,
+        "saturated": 0,
+        "saturation_pct": 0.0
+      }
+    },
+    {
+      "gains": "lqr",
+      "tau_m": 0.25,
+      "coast": 1.0,
+      "nominal": {
+        "success": 20,
+        "saturated": 0,
+        "saturation_pct": 0.0
+      },
+      "inertia": {
+        "success": 19,
+        "saturated": 0,
+        "saturation_pct": 0.0
+      }
+    },
+    {
+      "gains": "lqr",
+      "tau_m": 0.25,
+      "coast": 0.3,
+      "nominal": {
+        "success": 18,
+        "saturated": 0,
+        "saturation_pct": 0.0
+      },
+      "inertia": {
+        "success": 17,
+        "saturated": 1,
+        "saturation_pct": 0.5542857142857143
+      }
+    },
+    {
+      "gains": "soft",
+      "tau_m": 0.12,
+      "coast": 1.0,
+      "nominal": {
+        "success": 20,
+        "saturated": 0,
+        "saturation_pct": 0.0
+      },
+      "inertia": {
+        "success": 19,
+        "saturated": 0,
+        "saturation_pct": 0.0
+      }
+    },
+    {
+      "gains": "soft",
+      "tau_m": 0.12,
+      "coast": 0.3,
+      "nominal": {
+        "success": 4,
+        "saturated": 0,
+        "saturation_pct": 0.0
+      },
+      "inertia": {
+        "success": 10,
+        "saturated": 1,
+        "saturation_pct": 0.22571428571428573
+      }
+    },
+    {
+      "gains": "soft",
+      "tau_m": 0.18,
+      "coast": 1.0,
+      "nominal": {
+        "success": 0,
+        "saturated": 0,
+        "saturation_pct": 0.0
+      },
+      "inertia": {
+        "success": 12,
+        "saturated": 2,
+        "saturation_pct": 0.6685714285714286
+      }
+    },
+    {
+      "gains": "soft",
+      "tau_m": 0.18,
+      "coast": 0.3,
+      "nominal": {
+        "success": 0,
+        "saturated": 20,
+        "saturation_pct": 6.514285714285714
+      },
+      "inertia": {
+        "success": 1,
+        "saturated": 6,
+        "saturation_pct": 2.7600000000000002
+      }
+    },
+    {
+      "gains": "soft",
+      "tau_m": 0.25,
+      "coast": 1.0,
+      "nominal": {
+        "success": 0,
+        "saturated": 20,
+        "saturation_pct": 11.520000000000001
+      },
+      "inertia": {
+        "success": 1,
+        "saturated": 11,
+        "saturation_pct": 5.9485714285714275
+      }
+    },
+    {
+      "gains": "soft",
+      "tau_m": 0.25,
+      "coast": 0.3,
+      "nominal": {
+        "success": 0,
+        "saturated": 20,
+        "saturation_pct": 13.637142857142859
+      },
+      "inertia": {
+        "success": 0,
+        "saturated": 18,
+        "saturation_pct": 11.657142857142858
+      }
+    }
+  ],
+  "old_speed": {
+    "success": 0,
+    "saturated": 20,
+    "saturation_pct": 71.6742857142857
+  },
+  "damping_trials_worst_case": [
+    {
+      "kd_factor": 1.2,
+      "nominal_success": 18,
+      "inertia_success": 15,
+      "nominal_saturated": 0,
+      "inertia_saturated": 1
+    },
+    {
+      "kd_factor": 1.5,
+      "nominal_success": 14,
+      "inertia_success": 15,
+      "nominal_saturated": 0,
+      "inertia_saturated": 1
+    }
+  ]
+}

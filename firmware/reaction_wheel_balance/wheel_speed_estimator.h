@@ -21,7 +21,7 @@
 // accurate than the model's magnitude); otherwise the model's magnitude is
 // used as a fallback (e.g. very low speed where FG pulses are sparse).
 // =============================================================================
-#include <cmath>
+#include <math.h>
 
 class WheelSpeedEstimator {
 public:
@@ -42,7 +42,7 @@ public:
       omegaEst_ = omegaCmd;
     }
     float sign = (omegaEst_ >= 0.0f) ? 1.0f : -1.0f;
-    float mag = fgFresh ? fgMagnitude : std::fabs(omegaEst_);
+    float mag = fgFresh ? fgMagnitude : fabsf(omegaEst_);
     return sign * mag;
   }
 

@@ -1,5 +1,57 @@
 # Reaction Wheel Balance — Simulation & Gain Design (`sim/`)
 
+## Voltage-mode update ? 2026-09-19
+
+The new default uses `u=clip((omega_signed+tau_m_est*a)/omega_fs,-1,1)`.
+Measured: gear=6, motor full-scale=3500 rpm, light-wheel tau=0.18 s;
+weighted-wheel tau=0.45?0.59 s. These measurements supersede the historical
+speed-servo/soft-start assumptions and older results below.
+
+Run from `sim/`:
+
+```
+py -X utf8 design_gains.py --set tau_m=0.25 coast_decel_frac=0.3 --quick
+py -X utf8 design_gains.py --set control_mode=speed tau_m=0.18 --quick
+py -X utf8 voltage_sweep.py
+```
+
+`tau_m` is the plant value; `tau_m_est` is the controller estimate, fixed at
+0.18 s unless explicitly overridden. To model a newly calibrated motor, set
+both. The CLI prints the controller estimate for `MOTOR_TAU_S`.
+
+LQR gains remain Kp=1137.4, Kd=144.3, Kw=1, Ki=0.0387. Each cell is
+**successful runs / runs that hit duty saturation**, each out of 20.
+
+| Plant tau (s) | Coast fraction | Nominal inertia | Sampled wheel inertia |
+|---|---|---|---|
+| 0.12 | 1.0 | 20 / 0 | 20 / 0 |
+| 0.12 | 0.3 | 20 / 0 | 20 / 0 |
+| 0.18 | 1.0 | 20 / 0 | 20 / 0 |
+| 0.18 | 0.3 | 20 / 0 | 19 / 0 |
+| 0.25 | 1.0 | 20 / 0 | 19 / 0 |
+| 0.25 | 0.3 | 18 / 0 | 17 / 1 |
+
+Protocol: 5? initial tilt, 3.5 s, noise seeds 0?19, 1-sample sensor delay,
+2 ms DIR blanking, 0.5 ms RK4. Success uses `evaluate_run`: final 20% stays
+within 1? and 0.05 rad/s, with peak tilt below 60?. This is a simulation
+recovery metric, not the firmware's 20? FALLEN gate or a hardware guarantee.
+Inertia trials use fixed nominal gains and independent uniform draws over
+`m_w=0.25?0.5 kg`, `k_w=0.5?0.9`, RNG seed 20260919; other mechanics remain
+nominal. Tau and inertia are varied independently to expose uncertainty;
+the real motor's mechanical tau also changes with inertia.
+The hardest inertia case spends 0.554% of aggregate simulated time in duty
+saturation. Legacy speed mode at nominal tau/coast gives 0/20 recovery,
+20/20 saturated (71.67% of simulated time).
+
+Retuning trials: soft pole placement (wn=4) is worse; Kd ?1.2 / ?1.5 at the
+hardest case yields nominal 18/20 / 14/20 and inertia 15/20 / 15/20. Keep
+original LQR gains until wheel mass/inertia and braking are measured.
+Full base/soft results are in `voltage_results.json`; damping trials are also
+recorded there. Simulation assumes signed wheel speed plus noise, not actual
+FG dropout/sign-estimator behavior, and does not model the ~10% startup
+threshold or physical BRAKE pulses. Opposite-voltage torque remains assumed.
+
+
 โฟลเดอร์นี้เป็น **Python simulation + gain design tool เท่านั้น** (ไม่แตะ hardware/, firmware/,
 README.md หลัก) — ใช้จำลองพลวัตของระบบ, ออกแบบ/ตรวจสอบเกนควบคุม, และวิเคราะห์ไอเดีย "jump-up"
 ก่อนลงมือ implement บนบอร์ดจริง
@@ -82,18 +134,20 @@ theta_dd = (B·sin(theta) − I_w·ω̇_w) / (C + I_w)
 `L = (C+I_w)·θ̇ + I_w·ω_w` ต้องคงที่เสมอ (ทดสอบใน `test_model.py::TestMomentumSanity`) — เพราะ
 แรงบิดมอเตอร์เป็นแรงคู่ภายในที่หักล้างกันในระบบรวม (Newton's 3rd law)
 
-### 1.3 โมเดลมอเตอร์+ไดรเวอร์ (1st-order + limit)
+### 1.3 Voltage-mode motor model (updated 2026-09-19)
 
 ```
-ω̇_w_desired = (omega_cmd − omega_w) / tau_m
-ω̇_w = clip(ω̇_w_desired, −alpha_max, +alpha_max)
-
-alpha_max = tau_stall_wheel / I_w
-tau_stall_wheel = tau_stall_motor × gear_ratio × gear_eff
-omega_max = (motor_no_load_rpm × 2π/60) / gear_ratio
+omega_fs = (motor_no_load_rpm * 2*pi/60) / gear_ratio
+voltage_target = clip(omega_cmd, -omega_fs, omega_fs)
+alpha = clip((voltage_target - omega_w)/tau_m, -alpha_max, alpha_max)
+if voltage_target*omega_w >= 0 and abs(voltage_target) < abs(omega_w):
+    alpha *= coast_decel_frac
 ```
 
-`tau_m` (time constant ของลูปความเร็วภายในของไดรเวอร์ BLDC) **ไม่รู้ค่าจริง** — sweep 0.02-0.15s
+`tau_m=0.18 s` is the measured light-wheel mechanical time constant, range
+0.12?0.25 s. `alpha_max=tau_stall_motor*gear_ratio*gear_eff/I_w` remains an
+estimated current limit. Coast fraction includes zero duty; opposite voltage
+retains full torque in this model (unverified on hardware).
 
 ### 1.4 เซนเซอร์
 
@@ -103,19 +157,22 @@ omega_max = (motor_no_load_rpm × 2π/60) / gear_ratio
 - **Gyro**: ใช้ค่าตรงเป็น θ̇ ที่ใช้ในกฎควบคุม (มี noise + bias คงที่ต่อการทดลอง)
 - **FG tach** (ω_w): มี noise + quantization step (`omega_w_quant`)
 - **Delay**: หน่วง 1 sample (คำนวณ `a` จากค่าที่วัดได้ในรอบก่อนหน้า) ตาม spec
-- Sample rate ควบคุม: `dt_ctrl = 2ms` (500 Hz ตาม ESP32-C3 loop); physics step 0.5ms (RK4)
+- Sample rate ควบคุม: `dt_ctrl = 2ms` (500 Hz ตาม Arduino Mega 2560 loop); physics step 0.5ms (RK4)
 
-### 1.5 กฎควบคุม (ตรง contract กับ firmware, ห้ามเปลี่ยน)
+### 1.5 Controller contract
 
 ```
-a = Kp·theta + Kd·theta_dot + Kw·omega_w + Ki·integral(theta)
-omega_cmd += a·dt_ctrl
-omega_cmd = clip(omega_cmd, −omega_max, +omega_max)
-if |omega_cmd| < deadband: omega_out = 0   else omega_out = omega_cmd
+a = Kp*theta + Kd*theta_dot + Kw*omega_w + Ki*integral(theta)
+omega_cmd = clip(omega_meas + tau_m_est*a, -omega_fs, omega_fs)  # voltage default
+# control_mode="speed": omega_cmd = clip(omega_cmd + a*dt, -omega_fs, omega_fs)
 ```
 
-Anti-windup: หยุด integrate `integral(theta)` เมื่อ `omega_cmd` อิ่มตัว (saturated) และ error มี
-เครื่องหมายเดียวกับทิศที่ทำให้อิ่มตัวมากขึ้น (conditional integration) + clamp `|integral|`
+`omega_cmd` now means voltage-equivalent speed `u*omega_fs`. Angle integration
+freezes when error pushes duty further into saturation. Acceleration command
+is capped at 4000 rad/s?; at 85% full-scale measured wheel speed, outward
+acceleration is inhibited but deceleration remains available. Both modes use
+0.3 rad/s deadband and a full zero-duty sample before DIR reversal.
+
 
 ---
 

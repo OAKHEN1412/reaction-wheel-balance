@@ -13,7 +13,17 @@ void writeDutyRaw(float fraction) {
   uint32_t duty = (uint32_t)(fraction * PWM_MAX_DUTY + 0.5f);
   if (duty > PWM_MAX_DUTY) duty = PWM_MAX_DUTY;
   uint32_t applied = PWM_INVERT ? (PWM_MAX_DUTY - duty) : duty;
-  ledcWrite(PIN_MOTOR_PWM, applied);
+  OCR1A = (uint16_t)applied;
+}
+
+// Timer1 fast PWM, 10-bit (TOP = 0x3FF), no prescaler -> 16 MHz / 1024 =
+// ~15.6 kHz on OC1A = D11 on the Mega 2560. PIN_MOTOR_PWM must be 11.
+void setupPwmTimer() {
+  static_assert(PIN_MOTOR_PWM == 11, "Timer1 OC1A is D11 on the Mega 2560");
+  static_assert(PWM_RESOLUTION_BITS == 10, "Timer1 is set up for 10-bit fast PWM");
+  pinMode(PIN_MOTOR_PWM, OUTPUT);
+  TCCR1A = _BV(COM1A1) | _BV(WGM11) | _BV(WGM10);
+  TCCR1B = _BV(WGM12) | _BV(CS10);
 }
 
 void writeDirPin(int8_t dirSign) {
@@ -22,9 +32,12 @@ void writeDirPin(int8_t dirSign) {
 } // namespace
 
 void begin() {
+  // PWM first: with PWM_INVERT the driver runs flat out while the pin is LOW,
+  // so get it to the "stopped" level as early as possible after reset.
+  setupPwmTimer();
+  writeDutyRaw(0.0f);
   pinMode(PIN_MOTOR_DIR, OUTPUT);
   pinMode(PIN_MOTOR_BRAKE, OUTPUT);
-  ledcAttach(PIN_MOTOR_PWM, PWM_FREQ_HZ, PWM_RESOLUTION_BITS);
 
   state = MotorState();
   dirPinInitialized = false;

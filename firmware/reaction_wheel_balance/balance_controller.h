@@ -12,34 +12,15 @@
 //
 //     a = controlSign * ( Kp*theta + Kd*theta_dot + Kw*omega_w + Ki*integral(theta) )
 //
-// and integrate that into a wheel speed command:
-//
-//     omega_cmd += a * dt         (clamped to +-maxWheelSpeed)
-//
-// which is what actually gets handed to the motor driver as a speed/voltage
-// setpoint (see motor.h). omega_cmd is the state variable that carries the
-// wheel's momentum budget forward between control steps.
-//
-// SIGN CONVENTION (must be verified against real hardware -- see
-// firmware/README.md "tuning procedure" and config.h DEFAULT_CONTROL_SIGN):
-//   theta      : rad, 0 = upright, sign/axis chosen in config.h (IMU_*).
-//   theta_dot  : rad/s, gyro rate about the same axis, same sign convention.
-//   omega_w    : rad/s, wheel speed signed by the CURRENTLY COMMANDED motor
-//                direction (not independently sensed direction).
-//   We DEFINE "positive" wheel-command direction such that, with positive
-//   Kp, a positive theta (frame falling toward +theta) commands the wheel to
-//   accelerate in the +omega direction, and by the reaction-torque pairing
-//   this is assumed to push the frame back toward theta=0. Whether that
-//   assumption matches the real mechanism depends on: (a) which physical
-//   direction was wired to DIR_CW_LEVEL="positive" in config.h, and (b)
-//   which physical tilt direction was chosen as "positive theta" in
-//   config.h's IMU_* axis selection. Both are independently unconfirmed on
-//   this hardware. Rather than trying to derive the combined sign from two
-//   unverified choices, config.h exposes a single DEFAULT_CONTROL_SIGN
-//   (+1/-1) that flips the whole control law output. If the frame falls
-//   *faster* once BALANCING is engaged (in a repeatable way, not just
-//   "it never balances"), flip CONTROL_SIGN -- do not try to reverse the
-//   individual axis/motor polarity constants for this.
+// Voltage mode (default): omega_cmd = clip(omega_w + motorTauS*a, +/-fullScale).
+// omega_cmd denotes applied-voltage equivalent speed u*omega_fs, NOT a speed
+// setpoint. Legacy speed mode integrates a*dt instead. Voltage mode bypasses
+// affine minimum-duty mapping; motor_logic still applies the small deadband.
+// At the measured speed guard, inhibit further outward acceleration but allow
+// deceleration. Duty saturation conditionally freezes the angle integrator.
+// omega_w is the SIGNED estimate, never FG magnitude times current DIR.
+// Positive wheel acceleration produces negative frame acceleration; hardware
+// sign and IMU axes were verified 2026-09-19 and remain configured in config.h.
 //
 // The Kw*omega_w term exists so the wheel doesn't just spin up compensating
 // for small steady-state tilt/offset errors and saturate, uselessly. Its
@@ -51,13 +32,12 @@
 // simulation/LQR design -- see sim/README.md -- not from an assumption made
 // here.
 // =============================================================================
-#include <cmath>
-#include <cstdint>
+#include <math.h>
+#include <stdint.h>
 #include "motor_logic.h"
 
 struct ControllerGains {
-  // TODO(sim): all placeholders below -- replace with values from the
-  // Python simulation worker before real hardware tuning. See config.h.
+  // Gains are supplied from config.h or saved EEPROM preferences.
   float kp = 0.0f;
   float kd = 0.0f;
   float kw = 0.0f;
@@ -66,6 +46,8 @@ struct ControllerGains {
 };
 
 struct ControllerLimits {
+  bool voltageMode = true;
+  float motorTauS = 0.18f;
   float maxWheelSpeed = 300.0f;        // rad/s, SAFETY CLAMP on omega_cmd (<= fullScaleWheelSpeed)
   float fullScaleWheelSpeed = 300.0f;  // rad/s, wheel speed at duty fraction = 1.0 -- the SCALING
                                         // reference for toMotorFraction(), deliberately separate from
@@ -93,9 +75,10 @@ public:
   void reset() { integral_ = 0.0f; omegaCmd_ = 0.0f; }
 
   // theta: rad, upright = 0. thetaDot: rad/s. omegaWheel: rad/s, signed by
-  // the currently commanded motor direction. dt: s.
+  // WheelSpeedEstimator (inertia-aware model sign). dt: s.
   // Returns the wheel speed command omega_cmd (rad/s), clamped.
   float update(float theta, float thetaDot, float omegaWheel, float dt) {
+    float oldIntegral = integral_;
     if (gains_.ki != 0.0f) {
       integral_ += theta * dt;
       if (integral_ > limits_.integralClamp) integral_ = limits_.integralClamp;
@@ -108,9 +91,14 @@ public:
     if (a > limits_.maxAccelCmd) a = limits_.maxAccelCmd;
     if (a < -limits_.maxAccelCmd) a = -limits_.maxAccelCmd;
 
-    omegaCmd_ += a * dt;
-    if (omegaCmd_ > limits_.maxWheelSpeed) omegaCmd_ = limits_.maxWheelSpeed;
-    if (omegaCmd_ < -limits_.maxWheelSpeed) omegaCmd_ = -limits_.maxWheelSpeed;
+    if (limits_.voltageMode && omegaWheel * a > 0.0f &&
+        fabsf(omegaWheel) >= limits_.maxWheelSpeed) a = 0.0f;
+    float target = limits_.voltageMode ? omegaWheel + limits_.motorTauS * a
+                                      : omegaCmd_ + a * dt;
+    float cap = limits_.voltageMode ? limits_.fullScaleWheelSpeed : limits_.maxWheelSpeed;
+    omegaCmd_ = fmaxf(-cap, fminf(cap, target));
+    if (target != omegaCmd_ && target * gains_.controlSign * gains_.ki * theta > 0.0f)
+      integral_ = oldIntegral;
     return omegaCmd_;
   }
 
@@ -130,7 +118,8 @@ public:
     if (raw > 1.0f) raw = 1.0f;
     if (raw < -1.0f) raw = -1.0f;
 
-    float mag = std::fabs(raw);
+    if (limits_.voltageMode) return raw; // physical duty: no affine minimum-duty boost
+    float mag = fabsf(raw);
     if (mag < limits_.deadbandFraction) return 0.0f;
 
     float mappedMag = limits_.minDutyFraction + (1.0f - limits_.minDutyFraction) * mag;
@@ -163,7 +152,7 @@ inline bool balanceControllerSelfTest(const char **failMsg = nullptr) {
   {
     BalanceController c;
     ControllerGains g; g.kp = 10.0f; g.controlSign = 1.0f;
-    ControllerLimits l; l.maxWheelSpeed = 100.0f; l.maxAccelCmd = 10000.0f;
+    ControllerLimits l; l.voltageMode = false; l.maxWheelSpeed = 100.0f; l.maxAccelCmd = 10000.0f;
     c.setGains(g); c.setLimits(l);
     float cmd = c.update(0.1f, 0.0f, 0.0f, 0.01f);
     if (!(cmd > 0.0f)) return fail("positive theta did not produce positive wheel-speed command");
@@ -173,7 +162,7 @@ inline bool balanceControllerSelfTest(const char **failMsg = nullptr) {
   {
     BalanceController c;
     ControllerGains g; g.kp = 10.0f; g.controlSign = -1.0f;
-    ControllerLimits l; l.maxWheelSpeed = 100.0f; l.maxAccelCmd = 10000.0f;
+    ControllerLimits l; l.voltageMode = false; l.maxWheelSpeed = 100.0f; l.maxAccelCmd = 10000.0f;
     c.setGains(g); c.setLimits(l);
     float cmd = c.update(0.1f, 0.0f, 0.0f, 0.01f);
     if (!(cmd < 0.0f)) return fail("controlSign=-1 did not flip the output sign");
@@ -189,7 +178,7 @@ inline bool balanceControllerSelfTest(const char **failMsg = nullptr) {
   {
     BalanceController c;
     ControllerGains g; g.kp = 0; g.kd = 0; g.ki = 0; g.kw = -0.5f; g.controlSign = 1.0f;
-    ControllerLimits l; l.maxWheelSpeed = 1000.0f; l.fullScaleWheelSpeed = 1000.0f; l.maxAccelCmd = 10000.0f;
+    ControllerLimits l; l.voltageMode = false; l.maxWheelSpeed = 1000.0f; l.fullScaleWheelSpeed = 1000.0f; l.maxAccelCmd = 10000.0f;
     c.setGains(g); c.setLimits(l);
     float cmd = c.update(0.0f, 0.0f, 50.0f, 0.01f);
     if (!(cmd < 0.0f)) return fail("Kw*omega_w term arithmetic incorrect (expected negative contribution for Kw<0, omega_w>0)");
@@ -199,7 +188,7 @@ inline bool balanceControllerSelfTest(const char **failMsg = nullptr) {
   {
     BalanceController c;
     ControllerGains g; g.kp = 1000.0f;
-    ControllerLimits l; l.maxWheelSpeed = 50.0f; l.maxAccelCmd = 1.0e6f;
+    ControllerLimits l; l.voltageMode = false; l.maxWheelSpeed = 50.0f; l.maxAccelCmd = 1.0e6f;
     c.setGains(g); c.setLimits(l);
     float cmd = 0.0f;
     for (int i = 0; i < 1000; ++i) cmd = c.update(1.0f, 0.0f, 0.0f, 0.01f);
@@ -211,7 +200,7 @@ inline bool balanceControllerSelfTest(const char **failMsg = nullptr) {
   {
     BalanceController c;
     ControllerGains g; g.kp = 400.0f;
-    ControllerLimits l; l.maxWheelSpeed = 100.0f; l.fullScaleWheelSpeed = 100.0f; l.maxAccelCmd = 1.0e6f; l.deadbandFraction = 0.05f;
+    ControllerLimits l; l.voltageMode = false; l.maxWheelSpeed = 100.0f; l.fullScaleWheelSpeed = 100.0f; l.maxAccelCmd = 1.0e6f; l.deadbandFraction = 0.05f;
     c.setGains(g); c.setLimits(l);
     c.update(0.001f, 0.0f, 0.0f, 0.01f); // omega_cmd = 400*0.001*0.01 = 0.004 rad/s -> frac 0.00004
     if (c.toMotorFraction() != 0.0f) return fail("small command inside deadband did not map to exact zero fraction");
@@ -230,7 +219,7 @@ inline bool balanceControllerSelfTest(const char **failMsg = nullptr) {
   {
     BalanceController c;
     ControllerGains g; g.kp = 10000.0f; g.controlSign = 1.0f;
-    ControllerLimits l;
+    ControllerLimits l; l.voltageMode = false;
     l.fullScaleWheelSpeed = 200.0f;   // duty=1.0 <-> 200 rad/s at the wheel
     l.maxWheelSpeed = 200.0f;         // clamp not binding for this check
     l.maxAccelCmd = 1.0e7f;
@@ -240,13 +229,13 @@ inline bool balanceControllerSelfTest(const char **failMsg = nullptr) {
     c.update(1.0f, 0.0f, 0.0f, 0.01f); // omega_cmd = 10000*1*0.01 = 100 rad/s = half of fullScaleWheelSpeed
     float frac = c.toMotorFraction();
     float expected = 0.1f + 0.9f * 0.5f; // minDuty + (1-minDuty)*0.5 = 0.55
-    if (std::fabs(frac - expected) > 1e-3f) return fail("speed scaling (fullScaleWheelSpeed/minDutyFraction mapping) incorrect");
+    if (fabsf(frac - expected) > 1e-3f) return fail("speed scaling (fullScaleWheelSpeed/minDutyFraction mapping) incorrect");
   }
 
   // 7) Motor direction-flip safety (motor_logic.h): flipping direction while
   //    duty is still nonzero must be deferred; only once duty has reached
   //    zero is the direction pin allowed to change, and never in the same
-  //    step as applying nonzero duty in the new direction.
+  //    preceding step had nonzero duty (DIR is written before new PWM).
   {
     MotorState st;
     st.dirSign = 1;
@@ -259,6 +248,24 @@ inline bool balanceControllerSelfTest(const char **failMsg = nullptr) {
     MotorDecision d2 = decideMotorStep(st, -0.3f, 0.02f);
     if (!d2.changeDir || d2.newDirSign != -1) return fail("direction flip did not occur once duty reached zero");
     if (d2.dutyFraction <= 0.0f) return fail("duty was not applied after the direction flip completed");
+  }
+
+  {
+    BalanceController c;
+    ControllerLimits l; l.voltageMode = true; l.motorTauS = 0.18f;
+    l.fullScaleWheelSpeed = 60.0f; l.maxWheelSpeed = 51.0f;
+    l.minDutyFraction = 0.1f;
+    ControllerGains g; g.kp = 100.0f; g.ki = 1.0f;
+    c.setLimits(l); c.setGains(g);
+    c.update(0.0f, 0.0f, -12.0f, 0.002f);
+    if (fabsf(c.toMotorFraction() + 0.2f) > 1e-5f) return fail("signed back EMF mapping");
+    c.update(0.1f, 0.0f, 12.0f, 0.002f);
+    if (fabsf(c.omegaCmd() - 13.800036f) > 1e-4f) return fail("inverse acceleration mapping");
+    c.reset();
+    c.update(10.0f, 0.0f, 0.0f, 0.002f);
+    if (c.toMotorFraction() != 1.0f || c.integral() != 0.0f) return fail("voltage saturation antiwindup");
+    c.update(-10.0f, 0.0f, 0.0f, 0.002f);
+    if (c.toMotorFraction() != -1.0f) return fail("negative voltage saturation");
   }
 
   return true;

@@ -4,7 +4,8 @@ sim/model.py
 โมเดลจำลอง "ตรงตามสมการที่เฟิร์มแวร์ใช้จริง" (contract กับทีม firmware/):
 
     a = Kp*theta + Kd*theta_dot + Kw*omega_w + Ki*integral(theta)      [rad/s^2]
-    omega_cmd += a * dt_ctrl
+    omega_cmd = clip(omega_meas + tau_m_est*a, -omega_fs, omega_fs) # default voltage
+    # legacy control_mode="speed": omega_cmd += a * dt_ctrl
     omega_cmd = clip(omega_cmd, -omega_max, omega_max)
     (deadband ใกล้ 0 ก่อนส่งให้มอเตอร์)
 
@@ -39,8 +40,11 @@ def plant_deriv(theta: float, thetad: float, omega_w: float, omega_cmd: float,
 
     tau_ext: แรงบิดรบกวนจากภายนอกที่กระทำรอบจุดหมุน (ใช้ทดสอบ disturbance rejection)
     """
+    omega_cmd = float(np.clip(omega_cmd, -d["omega_max"], d["omega_max"]))
     domega_w = (omega_cmd - omega_w) / d["tau_m"]
     domega_w = np.clip(domega_w, -d["alpha_max"], d["alpha_max"])
+    if omega_cmd * omega_w >= 0 and abs(omega_cmd) < abs(omega_w):
+        domega_w *= d.get("coast_decel_frac", 1.0)
     thetadd = (d["B"] * np.sin(theta) - d["I_w"] * domega_w + tau_ext) / (d["C"] + d["I_w"])
     return thetad, thetadd, domega_w
 
@@ -121,11 +125,18 @@ class Controller:
     i_limit: float | None = None   # limit ของ |integral| (anti-windup clamp), None = auto
     delay_samples: int = 1
 
+    control_mode: str = "voltage"
+    tau_m_est: float = 0.18
+
     integral: float = 0.0
     omega_cmd: float = 0.0
     _buf: list = field(default_factory=list)
 
     def __post_init__(self):
+        if self.control_mode not in ("voltage", "speed"):
+            raise ValueError("control_mode must be voltage or speed")
+        if self.tau_m_est <= 0:
+            raise ValueError("tau_m_est must be positive")
         if self.i_limit is None:
             # จำกัด "การหน่วง" ของ integral term ไม่ให้เกิน ~50% ของ omega_max ต่อ 1 คำสั่ง a
             self.i_limit = (0.5 * self.omega_max) / max(abs(self.Ki), 1e-9) if self.Ki != 0 else 1e9
@@ -149,7 +160,11 @@ class Controller:
 
         a = self.Kp * theta_u + self.Kd * thetad_u + self.Kw * omega_u + self.Ki * self.integral
 
-        omega_cmd_new = self.omega_cmd + a * self.dt_ctrl
+        a = float(np.clip(a, -4000.0, 4000.0))
+        if self.control_mode == "voltage" and omega_u * a > 0 and abs(omega_u) >= 0.85 * self.omega_max:
+            a = 0.0
+        omega_cmd_new = (omega_u + self.tau_m_est * a if self.control_mode == "voltage"
+                         else self.omega_cmd + a * self.dt_ctrl)
         saturated = abs(omega_cmd_new) > self.omega_max
         omega_cmd_new = float(np.clip(omega_cmd_new, -self.omega_max, self.omega_max))
         self.omega_cmd = omega_cmd_new
@@ -193,7 +208,10 @@ def simulate(d: dict, gains: dict, theta0: float = 0.0, thetad0: float = 0.0,
     rng = np.random.default_rng(seed)
     sensors = Sensors(d=d, rng=rng, noisy=noisy, accel_bias=accel_bias)
     ctrl = Controller(Kp=gains["Kp"], Kd=gains["Kd"], Kw=gains["Kw"], Ki=gains["Ki"],
-                       omega_max=d["omega_max"], dt_ctrl=dt_ctrl)
+                       omega_max=d["omega_max"], dt_ctrl=dt_ctrl,
+                       control_mode=d.get("control_mode", "voltage"),
+                       tau_m_est=d.get("tau_m_est", 0.18),
+                       delay_samples=d.get("ctrl_delay_samples", 1), i_limit=1.0)
 
     theta, thetad, omega_w = theta0, thetad0, omega_w0
     t = 0.0
@@ -201,6 +219,7 @@ def simulate(d: dict, gains: dict, theta0: float = 0.0, thetad0: float = 0.0,
     hist = {k: [] for k in ["t", "theta", "thetad", "omega_w", "omega_cmd", "a",
                              "theta_hat", "saturated"]}
 
+    motor_dir, applied = 0, 0.0
     omega_cmd_current = 0.0
     for i in range(n_ctrl_steps):
         theta_hat, thetad_meas, omega_meas = sensors.sample(theta, thetad, omega_w)
@@ -209,6 +228,14 @@ def simulate(d: dict, gains: dict, theta0: float = 0.0, thetad0: float = 0.0,
             omega_cmd_current, a_cmd, sat = 0.0, 0.0, False
         else:
             omega_cmd_current, a_cmd, sat = ctrl.step(theta_hat, thetad_meas, omega_meas)
+
+        # Firmware DIR interlock: one complete zero-duty sample before reversal.
+        desired_dir = int(np.sign(omega_cmd_current))
+        if desired_dir and desired_dir != motor_dir and applied != 0:
+            omega_cmd_current = 0.0
+        elif desired_dir:
+            motor_dir = desired_dir
+        applied = omega_cmd_current
 
         tau_ext = disturbance(t) if disturbance is not None else 0.0
 

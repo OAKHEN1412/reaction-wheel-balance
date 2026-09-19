@@ -10,6 +10,7 @@ sim/test_model.py
 import sys
 import os
 import unittest
+from unittest.mock import patch
 
 import numpy as np
 
@@ -117,6 +118,68 @@ class TestSignConvention(unittest.TestCase):
 
     def test_kp_sign_is_positive_in_nominal_gains(self):
         self.assertGreater(NOMINAL_GAINS["Kp"], 0.0)
+
+
+class TestVoltageMode(unittest.TestCase):
+    def controller(self, **kw):
+        args = dict(Kp=100, Kd=0, Kw=0, Ki=0, omega_max=60,
+                    dt_ctrl=0.002, deadband=0, delay_samples=0)
+        args.update(kw)
+        return model.Controller(**args)
+
+    def test_inverse_model_and_signed_back_emf(self):
+        d = params.nominal_derived()
+        for omega in (-12, 12):
+            c = self.controller()
+            target, a, sat = c.step(0.1, 0, omega)
+            self.assertAlmostEqual(target, omega + 0.18 * a)
+            self.assertAlmostEqual(model.plant_deriv(0, 0, omega, target, d)[2], a)
+            self.assertFalse(sat)
+
+    def test_voltage_clipping_and_antiwindup(self):
+        c = self.controller(Ki=1)
+        for sign in (1, -1):
+            target, _, sat = c.step(sign * 10, 0, 0)
+            self.assertEqual(target, sign * 60)
+            self.assertTrue(sat)
+            self.assertEqual(c.integral, 0)
+
+    def test_speed_mode_remains_integrated(self):
+        c = self.controller(control_mode="speed")
+        self.assertAlmostEqual(c.step(0.1, 0, 12)[0], 0.02)
+        self.assertAlmostEqual(c.step(0.1, 0, 12)[0], 0.04)
+
+    def test_current_limit_and_duty_limit(self):
+        d = params.nominal_derived()
+        self.assertEqual(model.plant_deriv(0, 0, 0, 1e6, d)[2], d["alpha_max"])
+        d["alpha_max"] = 1e6
+        self.assertAlmostEqual(model.plant_deriv(0, 0, 0, 1e6, d)[2],
+                               d["omega_max"] / d["tau_m"])
+
+    def test_coast_asymmetry_both_directions(self):
+        d = params.nominal_derived()
+        weak = dict(d, coast_decel_frac=0.3)
+        for sign in (-1, 1):
+            for target in (0, 10):
+                normal = model.plant_deriv(0, 0, sign * 20, sign * target, d)[2]
+                self.assertAlmostEqual(model.plant_deriv(0, 0, sign * 20, sign * target, weak)[2], 0.3 * normal)
+            for target in (-10, 30):
+                self.assertEqual(model.plant_deriv(0, 0, sign * 20, sign * target, weak)[2],
+                                 model.plant_deriv(0, 0, sign * 20, sign * target, d)[2])
+
+    def test_reversal_inserts_zero_duty_interval(self):
+        d = params.nominal_derived()
+        commands = [(20.0, 0, False), (-20.0, 0, False), (-20.0, 0, False)]
+        with patch.object(model.Controller, "step", side_effect=commands):
+            h = model.simulate(d, NOMINAL_GAINS, T=3*d["dt_ctrl"], noisy=False)
+        np.testing.assert_array_equal(h["omega_cmd"], [20.0, 0.0, -20.0])
+        self.assertGreater(h["omega_w"][1], 0)  # still spinning during blank
+
+
+    def test_speed_guard_allows_reverse_torque(self):
+        c = self.controller()
+        self.assertEqual(c.step(1, 0, 55)[0], 55)
+        self.assertLess(c.step(-1, 0, 55)[0], 55)
 
 
 if __name__ == "__main__":

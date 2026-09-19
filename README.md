@@ -1,6 +1,6 @@
 # Reaction Wheel Balance (Self-Balancing Project)
 
-โปรเจคทรงตัวด้วย **ล้อเหวี่ยงปฏิกิริยา (Reaction Wheel)** — มอเตอร์ BLDC ขับแผ่นล้อเหวี่ยงให้เกิดแรงบิดปฏิกิริยาตามหลักอนุรักษ์โมเมนตัมเชิงมุม เพื่อรักษาสมดุลของโครงสร้างในแนวแกน X โดยอ่านมุมเอียงจากเซ็นเซอร์ IMU (MPU-6050) แล้วประมวลผลด้วย PID controller บน ESP32-C3 เพื่อสั่งมอเตอร์แก้การเอียง
+โปรเจคทรงตัวด้วย **ล้อเหวี่ยงปฏิกิริยา (Reaction Wheel)** — มอเตอร์ BLDC ขับแผ่นล้อเหวี่ยงให้เกิดแรงบิดปฏิกิริยาตามหลักอนุรักษ์โมเมนตัมเชิงมุม เพื่อรักษาสมดุลของโครงสร้างในแนวแกน X โดยอ่านมุมเอียงจากเซ็นเซอร์ IMU (MPU-6050) แล้วประมวลผลด้วย PID controller บน **Arduino Mega 2560** เพื่อสั่งมอเตอร์แก้การเอียง
 
 รายละเอียดเต็ม (วัตถุประสงค์, ขอบเขต, อุปกรณ์, วงจร, BOM/งบประมาณ, แผนงาน) ดูที่ [`project-brief.md`](./project-brief.md) — สรุปจากไฟล์ `Reaction Wheel Balance.pdf` และ `raction module.xlsx`
 
@@ -12,7 +12,7 @@
 | [`sim/`](./sim/README.md) | Python จำลองระบบ + ออกแบบเกน LQR + ตารางความต้องการฮาร์ดแวร์ + กราฟ |
 
 ## ลำดับการใช้งาน (สรุป)
-1. ต่อวงจรตาม `hardware/wiring.md` (ตั้ง buck = 5.0V ก่อนต่อ ESP32, ใส่ pull-up ที่ FG)
+1. ต่อวงจรตาม `hardware/wiring.md` (Mega VIN รับ +12V ตรงจากแบต ไม่ต้องมี buck, ใส่ pull-up ที่ FG ถ้าต้องการ)
 2. แฟลช `firmware/imu_test` → ตั้งแกน/เครื่องหมาย IMU ใน `config.h`
 3. แฟลช `firmware/motor_test` (ถอดล้อ/ยึดแน่น) → ตั้ง PWM/DIR/BRAKE polarity, FG pulses, วัด coast-down
 4. วัดมวล/COM/ความเฉื่อยล้อจริง → `py -X utf8 sim/design_gains.py --set ... --quick` → ได้เกน

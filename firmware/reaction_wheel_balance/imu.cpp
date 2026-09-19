@@ -53,8 +53,11 @@ bool readRawAccelGyro(int16_t accelRaw[3], int16_t gyroRaw[3]) {
 } // namespace
 
 bool begin() {
-  Wire.begin(PIN_I2C_SDA, PIN_I2C_SCL);
+  Wire.begin(); // Mega: SDA = D20, SCL = D21
   Wire.setClock(400000);
+  // AVR Wire can otherwise hang forever on a stuck bus (e.g. a loose SDA/SCL
+  // wire) and freeze the control loop with the motor still running.
+  Wire.setWireTimeout(3000 /* us */, true);
 
   // Wake the device (PWR_MGMT_1 default has SLEEP bit set).
   bool ok = writeRegister(kRegPwrMgmt1, 0x00);

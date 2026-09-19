@@ -1,15 +1,15 @@
 #pragma once
 // =============================================================================
 // motor_logic.h -- pure logic, NO Arduino dependency.
-// Decides how a desired signed speed fraction [-1,1] should be turned into a
+// Decides how a desired signed duty fraction [-1,1] should be turned into a
 // direction sign + PWM duty fraction, enforcing the rule: the F/R direction
 // pin is never changed while nonzero duty is (or was, last step) applied.
 // motor.cpp (Arduino-dependent) calls decideMotorStep() and only then touches
 // real pins/PWM, so this decision logic can be exercised standalone by
 // balanceControllerSelfTest() in balance_controller.h.
 // =============================================================================
-#include <cstdint>
-#include <cmath>
+#include <stdint.h>
+#include <math.h>
 
 struct MotorState {
   int8_t dirSign = 0;            // +1, -1, or 0 (undecided / stopped)
@@ -23,14 +23,14 @@ struct MotorDecision {
 };
 
 // state is updated in place to reflect the decision taken.
-// desiredFraction: signed target speed fraction, will be clamped to [-1,1].
+// desiredFraction: signed target duty fraction, will be clamped to [-1,1].
 // deadbandFraction: |desiredFraction| below this collapses to zero duty.
 inline MotorDecision decideMotorStep(MotorState &state, float desiredFraction, float deadbandFraction) {
   if (desiredFraction > 1.0f) desiredFraction = 1.0f;
   if (desiredFraction < -1.0f) desiredFraction = -1.0f;
 
   MotorDecision d;
-  float mag = std::fabs(desiredFraction);
+  float mag = fabsf(desiredFraction);
 
   if (mag < deadbandFraction) {
     // Inside deadband: force duty to zero. Direction pin is left untouched
@@ -59,7 +59,10 @@ inline MotorDecision decideMotorStep(MotorState &state, float desiredFraction, f
       state.appliedFraction = 0.0f;
       return d;
     }
-    // Duty already zero: safe to flip now.
+    // Duty was zero for the previous control interval (2 ms at 500 Hz).
+    // Flip even if the wheel still spins: opposite voltage requests reverse
+    // torque. Waiting for zero RPM would block balancing torque indefinitely.
+    // The driver's actual reverse-torque behavior still needs measurement.
     d.changeDir = true;
     d.newDirSign = desiredDir;
     state.dirSign = desiredDir;
