@@ -37,6 +37,8 @@ float jumpSpinRpm = JUMP_SPIN_RPM;
 uint16_t jumpKickMs = JUMP_KICK_MS;
 float jumpCaptureDeg = JUMP_CAPTURE_DEG;
 float jumpTargetRateDps = JUMP_TARGET_RATE_DPS;
+// Set on the JUMP_UP -> BALANCING transition; 0 means "not catching a jump".
+uint32_t captureMs = 0;
 
 ComplementaryFilter tiltFilter(0.98f);
 BalanceController controller;
@@ -307,6 +309,7 @@ void runJumpStep(float thetaRad, float rateRad, float fgWheelRpm, bool fgFresh) 
     Motor::coast();
     lastCmdRpm = 0;
     controller.reset(); // preserve the signed wheel estimator through capture
+    captureMs = millis();
     state = SystemState::BALANCING;
   } else {
     Motor::setSpeed(duty);
@@ -429,7 +432,26 @@ void runControlStep(float dt) {
           beyondSinceMs = 0;
         }
       }
+      // Fade the angle gain in after a jump capture (see CAPTURE_BLEND_MS).
+      // Hand-started balancing never enters this branch because captureMs is
+      // only set on the JUMP_UP -> BALANCING transition.
+      ControllerGains savedGains = controller.gains();
+      bool blending = false;
+      if (captureMs != 0) {
+        uint32_t since = (uint32_t)(millis() - captureMs);
+        if (since >= CAPTURE_BLEND_MS) {
+          captureMs = 0;
+        } else {
+          float frac = (float)since / (float)CAPTURE_BLEND_MS;
+          ControllerGains g = savedGains;
+          g.kp = savedGains.kp * (CAPTURE_KP_SCALE + (1.0f - CAPTURE_KP_SCALE) * frac);
+          g.ki = 0.0f; // no point winding up an integral during the catch
+          controller.setGains(g);
+          blending = true;
+        }
+      }
       float omegaCmd = controller.update(theta, thetaDot, omegaWheelSigned, dt);
+      if (blending) controller.setGains(savedGains);
       applyMotorCommand(omegaCmd, omegaWheelSigned);
       lastCmdRpm = omegaCmd * (60.0f / (2.0f * PI));
       break;

@@ -59,6 +59,10 @@ public:
   enum class Phase { SPINUP, KICK, COAST, CAPTURED, ABORTED };
   static constexpr float kDeg2RadF = 0.01745329252f;
   static constexpr float kRateBandDps = 15.0f;   // +/- around vTargetDps_
+  // A minimum wheel speed at capture was tried on 2026-09-22 and dropped. It
+  // separated the first 15 launches perfectly (every capture above 90 rpm held,
+  // every one below fell) and then scored 2/8 on the next batch. That is what
+  // fitting three successes looks like, not a real threshold.
   void setTargetRateDps(float v) { vTargetDps_ = v; }
   float targetRateDps() const { return vTargetDps_; }
   void begin(uint32_t now, float thetaDeg, float rpm, uint16_t kickMs, float captureDeg) {
@@ -121,11 +125,16 @@ public:
       return side_; // reverse VOLTAGE, motor_logic supplies the zero-duty interval
     }
     if (phase_ == Phase::COAST) {
-      // Gravity bleeds off the excess while the wheel free-wheels; hand over as
-      // soon as the frame is close enough, or kick again if it slowed too much.
+      // Gravity bleeds off the excess while the wheel free-wheels. The rate is
+      // checked BEFORE the angle: a frame that has coasted to a crawl must be
+      // kicked again, not handed over. Measured on the Nano build over ~30
+      // launches -- every capture at 4.0-5.7 deg with 32-34 dps fell, while
+      // 6.2-7.2 deg with 41-57 dps held every time. Testing the angle first
+      // let those slow arrivals through, because it captured whatever the
+      // rate was once the frame drifted inside captureDeg.
       float rising = -side_ * rateDps;
-      if (fabsf(thetaDeg) < captureDeg_) { phase_ = Phase::CAPTURED; return 0; }
       if (rising < vTargetDps_ - kRateBandDps) { phase_ = Phase::KICK; phaseStart_ = now; return side_; }
+      if (fabsf(thetaDeg) < captureDeg_) { phase_ = Phase::CAPTURED; return 0; }
       return 0.0f; // coast
     }
     return 0;

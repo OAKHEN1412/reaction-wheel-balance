@@ -33,6 +33,16 @@
 // frame is resting on either stop, and stops the machine while it is running,
 // which is the only way to stop it once the USB cable is off. Set
 // ENABLE_JUMP_BUTTON to 0 to compile it out if the button is not fitted.
+// Capture blend. A jump hands the frame over at 4..8 deg with 30..55 deg/s
+// still on it. Kp alone against 8 deg asks for ~160 rad/s^2 when the motor
+// delivers about 40, so the wheel saturates and that constant maximum torque
+// throws the frame straight past upright -- every failure in the 2026-09-22
+// batches overshot to 15..19 deg. For this long after capture the angle gain
+// is scaled down (the rate gain stays at full) so the controller spends the
+// window killing the rotation, then Kp fades in linearly to 100%.
+#define CAPTURE_BLEND_MS    350UL
+#define CAPTURE_KP_SCALE    0.25f
+
 #define ENABLE_JUMP_BUTTON  1
 #define PIN_JUMP_BUTTON     4
 #define BUTTON_DEBOUNCE_MS 30UL

@@ -22,3 +22,6 @@ date,spin_rpm,kick_ms,capture_deg,energy_k,firmware_note,spinup_ms,peak_rate_dps
 2026-09-21,550,450,8,75,rate window 60-90 dps,469,85,-5.7,70,5.7,1178,balanced,กติกาใหม่: เตะ->ไหล->ส่งต่อในช่วงความเร็ว
 2026-09-21,550,450,8,75,rate window 60-90 dps,473,87,-7.7,90,7.4,2556,balanced,
 2026-09-21,550,450,8,75,rate window 60-90 dps,432,89,-6.4,90,6.2,998,balanced,**3/3 สำเร็จ -> ตั้งเป็นค่าเริ่มต้นใน config.h**
+2026-09-22,550,450,8,,nano build - rate sweep,,,,,,,summary,"~90 launches. rate 75 -> 3/16, rate 65 -> 0/6, rate 55 -> 3/6, rate 50 -> 2/6, rate 40 -> 0/5; capture 5 deg -> 1/8, capture 4 deg -> 1/6"
+2026-09-22,550,450,8,,nano - Kw 1 instead of 3,,,,,,,0/5,ลด Kw ทำให้แย่ลงชัดเจน Kw=3 ถูกแล้ว
+2026-09-22,550,450,8,,nano - capture blend + coast rate-first,,,,,,,3/8,ค่าสุดท้ายที่ใช้ 38% (log: logs/nano_jump_campaign.log.gz)
