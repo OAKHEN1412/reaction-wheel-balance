@@ -35,6 +35,8 @@ uint32_t lastImuOkMs = 0, jumpStartPulses = 0;
 uint32_t jumpLastPulses = 0, jumpLastPulseMs = 0;
 float jumpSpinRpm = JUMP_SPIN_RPM;
 uint16_t jumpKickMs = JUMP_KICK_MS;
+float jumpCaptureDeg = JUMP_CAPTURE_DEG;
+float jumpTargetRateDps = JUMP_TARGET_RATE_DPS;
 
 ComplementaryFilter tiltFilter(0.98f);
 BalanceController controller;
@@ -122,7 +124,7 @@ void printHelp() {
   Serial.println(F("  save       store gains + offset to EEPROM"));
   Serial.println(F("  start      enable balancing (re-arms WAIT_UPRIGHT gate)"));
   Serial.println(F("  stop       disable balancing, brake+coast motor"));
-  Serial.println(F("  jump [wheel_rpm] [kick_ms]  manual jump; max 550 rpm / 500 ms"));
+  Serial.println(F("  jump [rpm] [kick_ms] [capture_deg] [rate_dps]  manual jump (rate = handover tilt rate)"));
   Serial.println(F("  jumpcfg    print jump parameters and rest gate"));
   Serial.println(F("  tel 0|1    telemetry CSV stream on/off"));
   Serial.println(F("  selftest   run pure-logic self-checks (balance_controller + wheel_speed_estimator)"));
@@ -180,7 +182,8 @@ void handleUprightHoldAndMaybeAdvance(float theta, SystemState nextState) {
 void printJumpConfig() {
   printKV(F("jump_spin_rpm="), jumpSpinRpm, 1);
   printKV(F("jump_kick_ms="), jumpKickMs, 0);
-  printKV(F("jump_capture_deg="), JUMP_CAPTURE_DEG, 1);
+  printKV(F("jump_capture_deg="), jumpCaptureDeg, 1);
+  printKV(F("jump_handover_rate_dps="), jumpTargetRateDps, 1);
   printKV(F("jump_default_spin_rpm="), JUMP_SPIN_RPM, 1);
   printKV(F("jump_default_kick_ms="), JUMP_KICK_MS, 0);
   Serial.println(F("jump: manual only; max=550rpm/500ms; rest=10..22deg <=3dps <=10rpm for 500ms"));
@@ -434,10 +437,41 @@ void handleCommand(String line) {
   } else if (cmd == "jump") {
     float rpm = JUMP_SPIN_RPM;
     uint16_t kick = JUMP_KICK_MS;
+    float capture = JUMP_CAPTURE_DEG;
+    float targetRate = jumpTargetRateDps;
+    // Optional 3rd arg: capture angle (deg). Split it off before the 2-arg parser.
+    String firstTwo = argStr;
+    bool captureOk = true;
+    {
+      int sp1 = argStr.indexOf(' ');
+      int sp2 = (sp1 < 0) ? -1 : argStr.indexOf(' ', sp1 + 1);
+      int sp3 = (sp2 < 0) ? -1 : argStr.indexOf(' ', sp2 + 1);
+      if (sp2 >= 0) {
+        String capStr = (sp3 < 0) ? argStr.substring(sp2 + 1) : argStr.substring(sp2 + 1, sp3);
+        capStr.trim();
+        firstTwo = argStr.substring(0, sp2);
+        char *end = nullptr;
+        double v = strtod(capStr.c_str(), &end);
+        captureOk = end != capStr.c_str() && *end == ' ' && isfinite(v) && v >= 3.0 && v <= 15.0;
+        if (captureOk) capture = (float)v;
+      }
+      // Optional 4th arg: handover tilt rate (dps).
+      if (sp3 >= 0) {
+        String kStr = argStr.substring(sp3 + 1);
+        kStr.trim();
+        char *end = nullptr;
+        double v = strtod(kStr.c_str(), &end);
+        if (end != kStr.c_str() && *end == ' ' && isfinite(v) && v >= 30.0 && v <= 150.0) {
+          targetRate = (float)v;
+        } else {
+          captureOk = false;
+        }
+      }
+    }
     if (!ENABLE_JUMP_UP || !CONTROL_MODE_VOLTAGE) {
       Serial.println(F("jump: disabled or not in voltage mode"));
-    } else if (!parseJumpArgs(argStr.c_str(), rpm, kick)) {
-      Serial.println(F("jump: invalid args; 0<rpm<=550, integer 1<=kick_ms<=500"));
+    } else if (!captureOk || !parseJumpArgs(firstTwo.c_str(), rpm, kick)) {
+      Serial.println(F("jump: invalid args; 0<rpm<=550, 1<=kick_ms<=500, 3<=capture_deg<=15, 30<=rate_dps<=150"));
     } else if ((state != SystemState::WAIT_UPRIGHT && state != SystemState::FALLEN) ||
                imuFailCount || (uint32_t)(millis()-lastImuOkMs) > 20 || !jumpRestGate.ready(millis())) {
       Serial.println(F("jump: requires fresh IMU, stationary frame at 10..22deg and stopped wheel for 500ms"));
@@ -448,7 +482,10 @@ void handleCommand(String line) {
       jumpStartPulses = FgTach::getPulseCount();
       jumpLastPulses = jumpStartPulses;
       jumpLastPulseMs = millis();
-      jumpController.begin(millis(), lastThetaDeg, rpm, kick, JUMP_CAPTURE_DEG);
+      jumpCaptureDeg = capture;
+      jumpTargetRateDps = targetRate;
+      jumpController.setTargetRateDps(targetRate);
+      jumpController.begin(millis(), lastThetaDeg, rpm, kick, capture);
       jumpRestGate.reset();
       uprightHoldActive = false;
       controller.reset();

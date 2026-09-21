@@ -56,7 +56,11 @@ public:
     float d = rpm / 450.0f;
     return d < kSpinDuty ? kSpinDuty : (d > 1.0f ? 1.0f : d);
   }
-  enum class Phase { SPINUP, KICK, CAPTURED, ABORTED };
+  enum class Phase { SPINUP, KICK, COAST, CAPTURED, ABORTED };
+  static constexpr float kDeg2RadF = 0.01745329252f;
+  static constexpr float kRateBandDps = 15.0f;   // +/- around vTargetDps_
+  void setTargetRateDps(float v) { vTargetDps_ = v; }
+  float targetRateDps() const { return vTargetDps_; }
   void begin(uint32_t now, float thetaDeg, float rpm, uint16_t kickMs, float captureDeg) {
     phase_ = Phase::SPINUP; start_ = phaseStart_ = now; reason_ = 0;
     side_ = thetaDeg > 0 ? 1 : -1;
@@ -98,10 +102,31 @@ public:
       else return -side_ * spinDutyFor(rpm_);
     }
     if (phase_ == Phase::KICK) {
-      // Capture wins at the deadline, as in the simulation. Never capture in SPINUP.
-      if (fabsf(thetaDeg) < captureDeg_) { phase_ = Phase::CAPTURED; return 0; }
+      // HANDOVER WINDOW (2026-09-21, from hardware): what decides the outcome is
+      // the tilt RATE at handover, not the angle alone. Balanced runs handed over
+      // at 7.5-7.7 deg with 68-76 dps; 50 dps stalled short of upright, while
+      // 100-195 dps overshot and fell the other way. The theoretical energy
+      // criterion did not match because the balance controller keeps pushing
+      // after capture, so the rate window is used directly.
+      float rising = -side_ * rateDps;                      // dps toward upright
+      if (rising > vTargetDps_ + kRateBandDps) {             // too fast: stop pushing
+        phase_ = Phase::COAST;
+        return 0;
+      }
+      if (fabsf(thetaDeg) < captureDeg_ && rising >= vTargetDps_ - kRateBandDps) {
+        phase_ = Phase::CAPTURED;
+        return 0;
+      }
       if ((uint32_t)(now-phaseStart_) >= kickMs_) return abort(9);
       return side_; // reverse VOLTAGE, motor_logic supplies the zero-duty interval
+    }
+    if (phase_ == Phase::COAST) {
+      // Gravity bleeds off the excess while the wheel free-wheels; hand over as
+      // soon as the frame is close enough, or kick again if it slowed too much.
+      float rising = -side_ * rateDps;
+      if (fabsf(thetaDeg) < captureDeg_) { phase_ = Phase::CAPTURED; return 0; }
+      if (rising < vTargetDps_ - kRateBandDps) { phase_ = Phase::KICK; phaseStart_ = now; return side_; }
+      return 0.0f; // coast
     }
     return 0;
   }
@@ -131,6 +156,7 @@ private:
   uint32_t start_ = 0, phaseStart_ = 0;
   float side_ = 1, restAngle_ = 16, rpm_ = 100, captureDeg_ = 10;
   uint16_t kickMs_ = 20;
+  float vTargetDps_ = 75.0f;  // handover tilt rate, see KICK
 };
 
 inline bool jumpControllerSelfTest() {
@@ -154,13 +180,49 @@ inline bool jumpControllerSelfTest() {
     if (c.step(0, side*16, 0, 0, false) != -side*JumpController::kSpinDuty) return false;
     if (c.step(98, side*16, 0, 110, false) != -side*JumpController::kSpinDuty) return false;
     if (c.step(102, side*16, 0, 110, true) != side) return false;
-    c.step(110, side*9, -side*30, 50, false);
+    c.step(110, side*9, -side*70, 50, false);  // 70 dps toward upright: inside the handover window
     if (c.phase() != JumpController::Phase::CAPTURED) return false;
     c.begin(0, side*16, 100, 20, 10);
     c.step(100, side*16, 0, 100, true);
     c.step(120, side*15, 0, 50, true);
     if (c.phase() != JumpController::Phase::ABORTED) return false;
   }
+  {
+    // Handover window: kick until the rate is in [vTarget-15, vTarget+15] dps
+    // near upright; too fast -> COAST until the angle is small enough.
+    JumpController ec;
+    ec.setTargetRateDps(75.0f);
+    ec.begin(0, -16, 100, 400, 8);
+    ec.step(0, -16, 0, 0, false);
+    ec.step(102, -16, 0, 110, true);          // -> KICK
+    if (ec.phase() != JumpController::Phase::KICK) return false;
+    ec.step(150, -12, 70, 50, false);         // inside the band but still 12 deg
+    if (ec.phase() != JumpController::Phase::KICK) return false;
+    ec.step(180, -6, 70, 50, false);          // 6 deg, 70 dps -> hand over
+    if (ec.phase() != JumpController::Phase::CAPTURED) return false;
+
+    JumpController fc;                         // too fast high up -> coast, then capture
+    fc.setTargetRateDps(75.0f);
+    fc.begin(0, -16, 100, 400, 8);
+    fc.step(0, -16, 0, 0, false);
+    fc.step(102, -16, 0, 110, true);
+    if (fc.step(150, -12, 140, 50, false) != 0.0f) return false;
+    if (fc.phase() != JumpController::Phase::COAST) return false;
+    fc.step(200, -10, 100, 0, false);          // still coasting at 10 deg
+    if (fc.phase() != JumpController::Phase::COAST) return false;
+    fc.step(240, -7, 85, 0, false);
+    if (fc.phase() != JumpController::Phase::CAPTURED) return false;
+
+    JumpController sc;                         // coasted too slow -> kick again
+    sc.setTargetRateDps(75.0f);
+    sc.begin(0, -16, 100, 400, 8);
+    sc.step(0, -16, 0, 0, false);
+    sc.step(102, -16, 0, 110, true);
+    sc.step(150, -12, 140, 50, false);
+    if (sc.step(300, -11, 30, 0, false) != -1.0f) return false; // back to KICK, duty = side_ (= -1)
+    if (sc.phase() != JumpController::Phase::KICK) return false;
+  }
+
   JumpController c;
   c.begin(0, 16, 100, 20, 10); c.step(1500, 16, 0, 0, false);
   if (c.phase() != JumpController::Phase::ABORTED) return false;

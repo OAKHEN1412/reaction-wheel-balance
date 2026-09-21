@@ -156,11 +156,16 @@
 // Defaults deliberately under-powered; see sim/out/jumpup and firmware/README.md.
 // ----------------------------------------------------------------------------
 #define ENABLE_JUMP_UP             true
-#define JUMP_SPIN_RPM              500.0f  // wheel RPM; command rejects values above 550.
-                                           // Hardware 2026-09-20: 500/350 self-righted from -15.6 deg and kept
-                                           // balancing; 100-350 rpm only reached -3..-10 deg.
-#define JUMP_KICK_MS               350     // kick deadline; capture at JUMP_CAPTURE_DEG ends it (~190 ms at 500 rpm)
-#define JUMP_CAPTURE_DEG           10.0f   // capture only during reverse-voltage KICK
+#define JUMP_SPIN_RPM              550.0f  // wheel RPM; command rejects values above 550.
+                                           // Hardware 2026-09-21: 550/450/8deg/75dps self-righted from ~-15 deg and
+                                           // kept balancing 3/3 tries (earlier fixed-angle handover: 3/10).
+#define JUMP_KICK_MS               450     // kick deadline; capture at JUMP_CAPTURE_DEG ends it (~190 ms at 500 rpm)
+#define JUMP_CAPTURE_DEG           8.0f   // capture only during reverse-voltage KICK
+// Handover tilt rate (deg/s toward upright). The KICK pushes until the frame
+// is rising at this rate near upright, coasting if it exceeds rate+15 and
+// kicking again below rate-15. Measured on hardware: 68-76 dps at ~7.6 deg
+// balanced; 50 dps stalled short; 100-195 dps overshot and fell the other way.
+#define JUMP_TARGET_RATE_DPS       75.0f
 // Pure jump logic: 1500 ms spin timeout, 2000 ms total, 25 deg abort,
 // 500 ms rest hold (10..22 deg, <=3 deg/s, <=10 wheel rpm).
 
