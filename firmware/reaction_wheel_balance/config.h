@@ -28,6 +28,15 @@
 #define PIN_MOTOR_BRAKE  6   // brake level (green wire)
 #define PIN_MOTOR_FG     2   // FG tach pulses (yellow wire), INT0, open-collector -> INPUT_PULLUP
 
+// Momentary pushbutton wired between the pin and GND (INPUT_PULLUP, so the pin
+// reads LOW while pressed). One button, two jobs: it launches a jump when the
+// frame is resting on either stop, and stops the machine while it is running,
+// which is the only way to stop it once the USB cable is off. Set
+// ENABLE_JUMP_BUTTON to 0 to compile it out if the button is not fitted.
+#define ENABLE_JUMP_BUTTON  1
+#define PIN_JUMP_BUTTON     4
+#define BUTTON_DEBOUNCE_MS 30UL
+
 // ----------------------------------------------------------------------------
 // Build size -- the `selftest` command's failure strings are plain (non-PROGMEM)
 // literals, so they cost about 1.1 kB of SRAM on top of ~8 kB of flash. The

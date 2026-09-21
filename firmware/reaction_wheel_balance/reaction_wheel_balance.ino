@@ -130,6 +130,9 @@ void printHelp() {
   Serial.println(F("  selftest   run pure-logic self-checks (balance_controller + wheel_speed_estimator)"));
   Serial.println(F("  get        print current gains/state"));
   Serial.println(F("  help       this message"));
+#if ENABLE_JUMP_BUTTON
+  Serial.println(F("Button on D4: press to jump from either side; press again while running to stop."));
+#endif
 }
 
 void printGet() {
@@ -189,6 +192,97 @@ void printJumpConfig() {
   Serial.println(F("jump: manual only; max=550rpm/500ms; rest=10..22deg <=3dps <=10rpm for 500ms"));
   Serial.println(F("jump: spin timeout=1500ms total=2000ms abort=25deg; spin FG loss=100ms"));
 }
+
+// Disarm and park the motor. Shared by the `stop` command and the button.
+void stopMotion() {
+  runEnabled = false;
+  Motor::brake();
+  Motor::coast();
+  controller.reset();
+  if (state != SystemState::CALIBRATING) state = SystemState::WAIT_UPRIGHT;
+  uprightHoldActive = false;
+}
+
+// Why a jump request was refused; None means it launched.
+enum class JumpDenial : uint8_t { None, Disabled, NotReady, BadSign };
+
+// The single path into JUMP_UP, so the serial command and the button cannot
+// drift apart on which safety conditions they check. The side to kick towards
+// comes from the sign of the current tilt inside JumpController::begin(), so
+// this works from either rest stop without being told which one.
+JumpDenial startJump(float rpm, uint16_t kick, float capture, float targetRate) {
+  if (!ENABLE_JUMP_UP || !CONTROL_MODE_VOLTAGE) return JumpDenial::Disabled;
+  if ((state != SystemState::WAIT_UPRIGHT && state != SystemState::FALLEN) ||
+      imuFailCount || (uint32_t)(millis() - lastImuOkMs) > 20 ||
+      !jumpRestGate.ready(millis())) {
+    return JumpDenial::NotReady;
+  }
+  if (controller.gains().controlSign != 1.0f) return JumpDenial::BadSign;
+
+  jumpSpinRpm = rpm;
+  jumpKickMs = kick;
+  jumpStartPulses = FgTach::getPulseCount();
+  jumpLastPulses = jumpStartPulses;
+  jumpLastPulseMs = millis();
+  jumpCaptureDeg = capture;
+  jumpTargetRateDps = targetRate;
+  jumpController.setTargetRateDps(targetRate);
+  jumpController.begin(millis(), lastThetaDeg, rpm, kick, capture);
+  jumpRestGate.reset();
+  uprightHoldActive = false;
+  controller.reset();
+  runEnabled = true; // an explicit jump request also authorizes balance capture
+  state = SystemState::JUMP_UP;
+  return JumpDenial::None;
+}
+
+void printJumpDenial(JumpDenial d) {
+  switch (d) {
+    case JumpDenial::None:
+      Serial.println(F("jump: SPINUP then reverse-voltage KICK"));
+      break;
+    case JumpDenial::Disabled:
+      Serial.println(F("jump: disabled or not in voltage mode"));
+      break;
+    case JumpDenial::NotReady:
+      Serial.println(F("jump: requires fresh IMU, stationary frame at 10..22deg and stopped wheel for 500ms"));
+      break;
+    case JumpDenial::BadSign:
+      Serial.println(F("jump: requires verified control sign +1"));
+      break;
+  }
+}
+
+#if ENABLE_JUMP_BUTTON
+// Momentary button to GND, read as a debounced falling edge. While the machine
+// is running the button stops it -- with the USB cable off that is the only
+// stop available -- and otherwise it launches a jump from whichever stop the
+// frame is resting on.
+void serviceJumpButton() {
+  static uint8_t stable = HIGH;
+  static uint8_t lastRaw = HIGH;
+  static uint32_t lastChangeMs = 0;
+
+  uint32_t now = millis();
+  uint8_t raw = digitalRead(PIN_JUMP_BUTTON);
+  if (raw != lastRaw) {
+    lastRaw = raw;
+    lastChangeMs = now;
+    return;
+  }
+  if (raw == stable || (uint32_t)(now - lastChangeMs) < BUTTON_DEBOUNCE_MS) return;
+  stable = raw;
+  if (stable != LOW) return; // act on the press, not the release
+
+  if (state == SystemState::BALANCING || state == SystemState::JUMP_UP) {
+    stopMotion();
+    Serial.println(F("button: stop"));
+    return;
+  }
+  Serial.print(F("button: "));
+  printJumpDenial(startJump(jumpSpinRpm, jumpKickMs, jumpCaptureDeg, jumpTargetRateDps));
+}
+#endif
 
 void runJumpStep(float thetaRad, float rateRad, float fgWheelRpm, bool fgFresh) {
   uint32_t pulses = FgTach::getPulseCount();
@@ -429,12 +523,7 @@ void handleCommand(String line) {
     uprightHoldActive = false;
     Serial.println(F("start: armed, waiting for upright hold"));
   } else if (cmd == "stop") {
-    runEnabled = false;
-    Motor::brake();
-    Motor::coast();
-    controller.reset();
-    if (state != SystemState::CALIBRATING) state = SystemState::WAIT_UPRIGHT;
-    uprightHoldActive = false;
+    stopMotion();
     Serial.println(F("stop: motor disabled"));
   } else if (cmd == "jumpcfg") {
     printJumpConfig();
@@ -472,30 +561,10 @@ void handleCommand(String line) {
         }
       }
     }
-    if (!ENABLE_JUMP_UP || !CONTROL_MODE_VOLTAGE) {
-      Serial.println(F("jump: disabled or not in voltage mode"));
-    } else if (!captureOk || !parseJumpArgs(firstTwo.c_str(), rpm, kick)) {
+    if (!captureOk || !parseJumpArgs(firstTwo.c_str(), rpm, kick)) {
       Serial.println(F("jump: invalid args; 0<rpm<=550, 1<=kick_ms<=500, 3<=capture_deg<=15, 30<=rate_dps<=150"));
-    } else if ((state != SystemState::WAIT_UPRIGHT && state != SystemState::FALLEN) ||
-               imuFailCount || (uint32_t)(millis()-lastImuOkMs) > 20 || !jumpRestGate.ready(millis())) {
-      Serial.println(F("jump: requires fresh IMU, stationary frame at 10..22deg and stopped wheel for 500ms"));
-    } else if (controller.gains().controlSign != 1.0f) {
-      Serial.println(F("jump: requires verified control sign +1"));
     } else {
-      jumpSpinRpm = rpm; jumpKickMs = kick;
-      jumpStartPulses = FgTach::getPulseCount();
-      jumpLastPulses = jumpStartPulses;
-      jumpLastPulseMs = millis();
-      jumpCaptureDeg = capture;
-      jumpTargetRateDps = targetRate;
-      jumpController.setTargetRateDps(targetRate);
-      jumpController.begin(millis(), lastThetaDeg, rpm, kick, capture);
-      jumpRestGate.reset();
-      uprightHoldActive = false;
-      controller.reset();
-      runEnabled = true; // this explicit command also authorizes balance capture
-      state = SystemState::JUMP_UP;
-      Serial.println(F("jump: manual SPINUP then reverse-voltage KICK"));
+      printJumpDenial(startJump(rpm, kick, capture, targetRate));
     }
   } else if (cmd == "tel") {
     telemetryEnabled = hasArg ? (argVal != 0.0f) : !telemetryEnabled;
@@ -570,6 +639,9 @@ void setup() {
 
   Motor::begin(); // leaves motor braked
   FgTach::begin(PIN_MOTOR_FG);
+#if ENABLE_JUMP_BUTTON
+  pinMode(PIN_JUMP_BUTTON, INPUT_PULLUP);
+#endif
 
   loadPrefs();
   ControllerLimits limits;
@@ -623,5 +695,8 @@ void loop() {
     if (telemetryEnabled) printTelemetry();
   }
 
+#if ENABLE_JUMP_BUTTON
+  serviceJumpButton();
+#endif
   pollSerial();
 }
