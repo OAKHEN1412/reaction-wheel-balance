@@ -33,7 +33,12 @@
 // =============================================================================
 #include <Arduino.h>
 
-static const uint8_t PIN_PWM = 11;   // OC1A
+// Timer1 OC1A sits on a different pin per chip -- keep in step with config.h.
+#if defined(__AVR_ATmega2560__)
+static const uint8_t PIN_PWM = 11;   // OC1A on the Mega 2560
+#else
+static const uint8_t PIN_PWM = 9;    // OC1A on the ATmega328P (Nano/Uno)
+#endif
 static const uint8_t PIN_DIR = 7;
 static const uint8_t PIN_BRAKE = 6;
 static const uint8_t PIN_FG = 2;     // INT0
