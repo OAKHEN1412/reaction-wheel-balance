@@ -6,7 +6,12 @@
 namespace Imu {
 
 namespace {
-constexpr uint8_t kAddr = 0x68;
+// AD0 selects the address: tied to GND it is 0x68, pulled high it is 0x69.
+// The wiring ties AD0 to GND, but a broken or missing AD0 wire leaves the pin
+// floating, and then the part answers on either address -- and can change its
+// mind between resets. Probing both at begin() turns that from a dead machine
+// into a warning, without hiding the fault.
+uint8_t kAddr = 0x68;
 constexpr uint8_t kRegWhoAmI = 0x75;
 constexpr uint8_t kRegPwrMgmt1 = 0x6B;
 constexpr uint8_t kRegConfig = 0x1A;     // DLPF_CFG
@@ -60,6 +65,19 @@ bool begin() {
   // AVR Wire can otherwise hang forever on a stuck bus (e.g. a loose SDA/SCL
   // wire) and freeze the control loop with the motor still running.
   Wire.setWireTimeout(3000 /* us */, true);
+
+  // Pick whichever address answers, preferring the wired-for 0x68.
+  static const uint8_t kCandidates[2] = {0x68, 0x69};
+  for (uint8_t i = 0; i < 2; i++) {
+    Wire.beginTransmission(kCandidates[i]);
+    if (Wire.endTransmission() == 0) {
+      kAddr = kCandidates[i];
+      break;
+    }
+  }
+  if (kAddr != 0x68) {
+    Serial.println(F("WARNING: IMU answered on 0x69 -- AD0 is not tied to GND. Fix the wiring."));
+  }
 
   // Wake the device (PWR_MGMT_1 default has SLEEP bit set).
   bool ok = writeRegister(kRegPwrMgmt1, 0x00);
