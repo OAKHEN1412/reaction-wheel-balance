@@ -6,17 +6,42 @@
 // =============================================================================
 
 // ----------------------------------------------------------------------------
-// Pins -- Arduino Mega 2560 (switched from ESP32-C3 on 2026-09-19 because the
-// BLDC-3640 driver inputs are 5V logic with strong pull-ups; the Mega drives
-// them directly). See hardware/wiring.md.
+// Pins -- builds for both the Arduino Mega 2560 (bench/dev board) and the
+// Arduino Nano / ATmega328P (the on-frame board, fitted 2026-09-21). Switched
+// off the ESP32-C3 on 2026-09-19 because the BLDC-3640 driver inputs are 5V
+// logic with strong pull-ups, which both AVR boards drive directly.
+// See hardware/wiring.md.
 // ----------------------------------------------------------------------------
-// I2C is fixed on the Mega: SDA = D20, SCL = D21 (Wire.begin() takes no pins).
+// I2C is fixed by the chip and Wire.begin() takes no pins:
+//   Mega 2560 -> SDA = D20, SCL = D21
+//   Nano/328P -> SDA = A4,  SCL = A5
 #define PIN_IMU_INT      3   // optional (INT1); not currently used by the firmware logic
 
-#define PIN_MOTOR_PWM   11   // speed command -- MUST be D11 (Timer1 OC1A, see motor.cpp)
+// The PWM pin is NOT free to choose: motor.cpp drives Timer1 OC1A directly to
+// get 15.6 kHz, and that output sits on a different pin on each chip.
+#if defined(__AVR_ATmega2560__)
+#define PIN_MOTOR_PWM   11   // Timer1 OC1A on the Mega 2560
+#else
+#define PIN_MOTOR_PWM    9   // Timer1 OC1A on the ATmega328P (Nano/Uno)
+#endif
 #define PIN_MOTOR_DIR    7   // F/R direction level (white wire)
 #define PIN_MOTOR_BRAKE  6   // brake level (green wire)
 #define PIN_MOTOR_FG     2   // FG tach pulses (yellow wire), INT0, open-collector -> INPUT_PULLUP
+
+// ----------------------------------------------------------------------------
+// Build size -- the `selftest` command's failure strings are plain (non-PROGMEM)
+// literals, so they cost about 1.1 kB of SRAM on top of ~8 kB of flash. The
+// Mega swallows that; the Nano (32 kB flash / 2 kB SRAM) does not, and the
+// tests are pure logic that does not depend on the board, so they are compiled
+// out there. Run `selftest` on the Mega before flashing the Nano.
+// ----------------------------------------------------------------------------
+#ifndef ENABLE_SELFTEST
+#if defined(__AVR_ATmega2560__)
+#define ENABLE_SELFTEST 1
+#else
+#define ENABLE_SELFTEST 0
+#endif
+#endif
 
 // ----------------------------------------------------------------------------
 // Motor driver polarity -- MEASURED on the real BLDC-3640 on 2026-09-19 with
@@ -134,6 +159,9 @@
 // Number of consecutive failed IMU reads before the firmware force-stops the
 // motor as a safety measure.
 #define IMU_FAIL_LIMIT             10
+// Consecutive failed IMU reads tolerated during a jump before aborting
+// (2 ms each at 500 Hz). One is too strict: motor current spikes cause them.
+#define JUMP_IMU_FAIL_LIMIT         5
 
 // ----------------------------------------------------------------------------
 // Loop timing
@@ -183,7 +211,10 @@
 #define DEFAULT_KP                 1137.4f
 #define DEFAULT_KD                 500.0f   // hardware-tuned 2026-09-19: 144.3 (LQR) fell; 300 balanced (tilt SD 1.6 deg),
                                            // 350 -> 0.71, 400 -> 0.49, 500 -> 0.34 deg (duty jitter +20%, no buzz)
-#define DEFAULT_KW                 1.0f
+#define DEFAULT_KW                 3.0f   // raised from 1.0 on 2026-09-21: at Kw=1 the wheel wound up
+                                           // one way during a long balance (-178..-38 rpm); Kw=3 keeps it
+                                           // bounded (55..139 rpm) for +0.04 deg of tilt SD. Re-check after
+                                           // the Nano rebuild -- this was measured on the bench frame.
 #define DEFAULT_KI                 0.0387f
 #define DEFAULT_CONTROL_SIGN       1.0f   // MEASURED +1 (2026-09-19, firmware/sign_test): +omega spin-up kicks
                                            // the frame to -theta (-10.3 deg), -omega to +theta (+7.0 deg).

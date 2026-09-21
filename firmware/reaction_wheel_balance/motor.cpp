@@ -17,9 +17,14 @@ void writeDutyRaw(float fraction) {
 }
 
 // Timer1 fast PWM, 10-bit (TOP = 0x3FF), no prescaler -> 16 MHz / 1024 =
-// ~15.6 kHz on OC1A = D11 on the Mega 2560. PIN_MOTOR_PWM must be 11.
+// ~15.6 kHz on OC1A. Both chips run at 16 MHz so the frequency is identical;
+// only the pin OC1A comes out on differs (D11 on the Mega, D9 on the 328P).
 void setupPwmTimer() {
+#if defined(__AVR_ATmega2560__)
   static_assert(PIN_MOTOR_PWM == 11, "Timer1 OC1A is D11 on the Mega 2560");
+#else
+  static_assert(PIN_MOTOR_PWM == 9, "Timer1 OC1A is D9 on the ATmega328P");
+#endif
   static_assert(PWM_RESOLUTION_BITS == 10, "Timer1 is set up for 10-bit fast PWM");
   pinMode(PIN_MOTOR_PWM, OUTPUT);
   TCCR1A = _BV(COM1A1) | _BV(WGM11) | _BV(WGM10);

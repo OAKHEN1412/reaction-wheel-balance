@@ -54,7 +54,9 @@ bool readRawAccelGyro(int16_t accelRaw[3], int16_t gyroRaw[3]) {
 
 bool begin() {
   Wire.begin(); // Mega: SDA = D20, SCL = D21
-  Wire.setClock(400000);
+  // 200 kHz rather than 400 kHz: slower edges tolerate the motor's switching
+  // noise better, and a 14-byte read still costs well under 1 ms.
+  Wire.setClock(200000);
   // AVR Wire can otherwise hang forever on a stuck bus (e.g. a loose SDA/SCL
   // wire) and freeze the control loop with the motor still running.
   Wire.setWireTimeout(3000 /* us */, true);
@@ -84,7 +86,10 @@ bool begin() {
 
 bool read(ImuSample &out) {
   int16_t accelRaw[3], gyroRaw[3];
-  if (!readRawAccelGyro(accelRaw, gyroRaw)) {
+  // One immediate retry: the motor's current spikes corrupt the odd I2C
+  // transfer (hardware 2026-09-21 -- repeated failures aborted good jumps).
+  // A retry costs ~0.4 ms at 200 kHz, well inside the 2 ms control period.
+  if (!readRawAccelGyro(accelRaw, gyroRaw) && !readRawAccelGyro(accelRaw, gyroRaw)) {
     out.ok = false;
     return false;
   }

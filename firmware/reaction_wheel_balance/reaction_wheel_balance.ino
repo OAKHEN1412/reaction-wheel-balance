@@ -243,8 +243,12 @@ void runControlStep(float dt) {
   if (!ok) {
     imuFailCount++;
     jumpRestGate.reset();
-    if (state == SystemState::JUMP_UP) {
-      enterFallen(); // no open-loop kick on stale tilt, even for one missed read
+    // A single missed I2C read is 2 ms of stale tilt; the motor's current
+    // spikes caused one during a kick on 2026-09-21 and killed an otherwise
+    // good jump (the frame had reached 0.1 deg). Tolerate a few in a row,
+    // then abort rather than keep kicking blind.
+    if (state == SystemState::JUMP_UP && imuFailCount >= JUMP_IMU_FAIL_LIMIT) {
+      enterFallen();
       runEnabled = false;
       lastCmdRpm = 0;
       Serial.println(F("jump: aborted (IMU read failed)"));
@@ -497,6 +501,7 @@ void handleCommand(String line) {
     telemetryEnabled = hasArg ? (argVal != 0.0f) : !telemetryEnabled;
     Serial.println(telemetryEnabled ? F("telemetry on") : F("telemetry off"));
   } else if (cmd == "selftest") {
+#if ENABLE_SELFTEST
     const char *msg = nullptr;
     bool passed = balanceControllerSelfTest(&msg);
     if (passed) {
@@ -516,6 +521,10 @@ void handleCommand(String line) {
       Serial.println(')');
     }
     Serial.println(jumpControllerSelfTest() ? F("selftest: jump_controller PASS") : F("selftest: jump_controller FAIL"));
+#else
+    // Compiled out on the Nano: see ENABLE_SELFTEST in config.h.
+    Serial.println(F("selftest: not built on this board -- run it on the Mega"));
+#endif
   } else if (cmd == "get") {
     printGet();
   } else if (cmd == "help") {
