@@ -218,8 +218,12 @@
 // Kd, Kw and Ki all take the same sign as Kp (from LQR).
 // ----------------------------------------------------------------------------
 #define DEFAULT_KP                 1137.4f
-#define DEFAULT_KD                 500.0f   // hardware-tuned 2026-09-19: 144.3 (LQR) fell; 300 balanced (tilt SD 1.6 deg),
-                                           // 350 -> 0.71, 400 -> 0.49, 500 -> 0.34 deg (duty jitter +20%, no buzz)
+#define DEFAULT_KD                 450.0f   // re-tuned 2026-09-22 on the Nano build (the board moved onto the frame,
+                                           // so the mass and CoG changed). 400 -> SD 0.55, 450 -> 0.42/0.51, 500 -> 0.45,
+                                           // 600 -> 3.32 deg with duty saturating: 400..500 are within measurement noise
+                                           // of each other, 450 just sits furthest from the 600 cliff.
+                                           // Was 500.0f, tuned 2026-09-19 on the Mega build with the board off-frame:
+                                           // 144.3 (LQR) fell; 300 -> SD 1.6, 350 -> 0.71, 400 -> 0.49, 500 -> 0.34 deg.
 #define DEFAULT_KW                 3.0f   // raised from 1.0 on 2026-09-21: at Kw=1 the wheel wound up
                                            // one way during a long balance (-178..-38 rpm); Kw=3 keeps it
                                            // bounded (55..139 rpm) for +0.04 deg of tilt SD. Re-check after
