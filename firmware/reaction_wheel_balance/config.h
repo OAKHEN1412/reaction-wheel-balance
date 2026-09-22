@@ -213,6 +213,14 @@
 // kicking again below rate-15. Measured on hardware: 68-76 dps at ~7.6 deg
 // balanced; 50 dps stalled short; 100-195 dps overshot and fell the other way.
 #define JUMP_TARGET_RATE_DPS       75.0f
+// Duty applied during COAST to keep the wheel turning instead of letting it
+// free-wheel. 0 restores the original behaviour. Over 32 launches on the fixed
+// base (2026-09-22) every catch that held arrived with the wheel at 131-350
+// rpm and every handover below 116 rpm fell; the ones that fell had coasted
+// long enough for friction to take the wheel with the excess tilt rate.
+// Settable at runtime as the 5th argument of 'jump' so it can be swept in one
+// session. Reduce it if the frame keeps being pushed during COAST.
+#define JUMP_COAST_HOLD_DUTY       0.20f
 // Pure jump logic: 1500 ms spin timeout, 2000 ms total, 25 deg abort,
 // 500 ms rest hold (10..22 deg, <=3 deg/s, <=10 wheel rpm).
 

@@ -37,6 +37,7 @@ float jumpSpinRpm = JUMP_SPIN_RPM;
 uint16_t jumpKickMs = JUMP_KICK_MS;
 float jumpCaptureDeg = JUMP_CAPTURE_DEG;
 float jumpTargetRateDps = JUMP_TARGET_RATE_DPS;
+float jumpCoastHoldDuty = JUMP_COAST_HOLD_DUTY;
 // Set on the JUMP_UP -> BALANCING transition; 0 means "not catching a jump".
 uint32_t captureMs = 0;
 
@@ -189,6 +190,7 @@ void printJumpConfig() {
   printKV(F("jump_kick_ms="), jumpKickMs, 0);
   printKV(F("jump_capture_deg="), jumpCaptureDeg, 1);
   printKV(F("jump_handover_rate_dps="), jumpTargetRateDps, 1);
+  printKV(F("jump_coast_hold_duty="), jumpCoastHoldDuty, 2);
   printKV(F("jump_default_spin_rpm="), JUMP_SPIN_RPM, 1);
   printKV(F("jump_default_kick_ms="), JUMP_KICK_MS, 0);
   Serial.println(F("jump: manual only; max=550rpm/500ms; rest=10..22deg <=3dps <=10rpm for 500ms"));
@@ -229,6 +231,7 @@ JumpDenial startJump(float rpm, uint16_t kick, float capture, float targetRate) 
   jumpCaptureDeg = capture;
   jumpTargetRateDps = targetRate;
   jumpController.setTargetRateDps(targetRate);
+  jumpController.setCoastHoldDuty(jumpCoastHoldDuty);
   jumpController.begin(millis(), lastThetaDeg, rpm, kick, capture);
   jumpRestGate.reset();
   uprightHoldActive = false;
@@ -554,6 +557,7 @@ void handleCommand(String line) {
     uint16_t kick = JUMP_KICK_MS;
     float capture = JUMP_CAPTURE_DEG;
     float targetRate = jumpTargetRateDps;
+    float coastHold = jumpCoastHoldDuty;
     // Optional 3rd arg: capture angle (deg). Split it off before the 2-arg parser.
     String firstTwo = argStr;
     bool captureOk = true;
@@ -561,6 +565,7 @@ void handleCommand(String line) {
       int sp1 = argStr.indexOf(' ');
       int sp2 = (sp1 < 0) ? -1 : argStr.indexOf(' ', sp1 + 1);
       int sp3 = (sp2 < 0) ? -1 : argStr.indexOf(' ', sp2 + 1);
+      int sp4 = (sp3 < 0) ? -1 : argStr.indexOf(' ', sp3 + 1);
       if (sp2 >= 0) {
         String capStr = (sp3 < 0) ? argStr.substring(sp2 + 1) : argStr.substring(sp2 + 1, sp3);
         capStr.trim();
@@ -572,7 +577,7 @@ void handleCommand(String line) {
       }
       // Optional 4th arg: handover tilt rate (dps).
       if (sp3 >= 0) {
-        String kStr = argStr.substring(sp3 + 1);
+        String kStr = (sp4 < 0) ? argStr.substring(sp3 + 1) : argStr.substring(sp3 + 1, sp4);
         kStr.trim();
         char *end = nullptr;
         double v = strtod(kStr.c_str(), &end);
@@ -582,10 +587,27 @@ void handleCommand(String line) {
           captureOk = false;
         }
       }
+      // Optional 5th arg: COAST hold duty (0..0.5). Runtime-settable so the
+      // value can be swept in one session instead of one flash per point.
+      // This accepts a bare final token; the checks above additionally allow a
+      // trailing space, which is how they have always been written.
+      if (sp4 >= 0) {
+        String hStr = argStr.substring(sp4 + 1);
+        hStr.trim();
+        char *end = nullptr;
+        double v = strtod(hStr.c_str(), &end);
+        if (end != hStr.c_str() && (*end == ' ' || *end == ' ') &&
+            isfinite(v) && v >= 0.0 && v <= 0.5) {
+          coastHold = (float)v;
+        } else {
+          captureOk = false;
+        }
+      }
     }
     if (!captureOk || !parseJumpArgs(firstTwo.c_str(), rpm, kick)) {
-      Serial.println(F("jump: invalid args; 0<rpm<=550, 1<=kick_ms<=500, 3<=capture_deg<=15, 30<=rate_dps<=150"));
+      Serial.println(F("jump: invalid args; 0<rpm<=550, 1<=kick_ms<=500, 3<=capture_deg<=15, 30<=rate_dps<=150, 0<=coast_hold<=0.5"));
     } else {
+      jumpCoastHoldDuty = coastHold;
       printJumpDenial(startJump(rpm, kick, capture, targetRate));
     }
   } else if (cmd == "tel") {

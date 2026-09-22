@@ -65,6 +65,8 @@ public:
   // fitting three successes looks like, not a real threshold.
   void setTargetRateDps(float v) { vTargetDps_ = v; }
   float targetRateDps() const { return vTargetDps_; }
+  void setCoastHoldDuty(float v) { coastHold_ = v < 0 ? 0 : (v > 0.5f ? 0.5f : v); }
+  float coastHoldDuty() const { return coastHold_; }
   void begin(uint32_t now, float thetaDeg, float rpm, uint16_t kickMs, float captureDeg) {
     phase_ = Phase::SPINUP; start_ = phaseStart_ = now; reason_ = 0; overspeed_ = 0;
     side_ = thetaDeg > 0 ? 1 : -1;
@@ -142,7 +144,16 @@ public:
       float rising = -side_ * rateDps;
       if (rising < vTargetDps_ - kRateBandDps) { phase_ = Phase::KICK; phaseStart_ = now; return side_; }
       if (fabsf(thetaDeg) < captureDeg_) { phase_ = Phase::CAPTURED; return 0; }
-      return 0.0f; // coast
+      // Hold the wheel instead of letting it free-wheel. Measured over 32
+      // launches on the fixed base (2026-09-22): every catch that held arrived
+      // with the wheel still at 131-350 rpm, and every handover below 116 rpm
+      // fell. The ones that fell had coasted -- gravity bled off the excess
+      // tilt rate, but friction bled off the wheel at the same time, and the
+      // wheel is the authority the balance controller needs a moment later.
+      // A wheel held at constant speed exerts no reaction torque (torque
+      // follows d(omega)/dt), so the frame still stops being pushed; this only
+      // pays for friction. coastHold_ = 0 restores the old free-wheel.
+      return side_ * coastHold_;
     }
     return 0;
   }
@@ -174,6 +185,7 @@ private:
   float side_ = 1, restAngle_ = 16, rpm_ = 100, captureDeg_ = 10;
   uint16_t kickMs_ = 20;
   float vTargetDps_ = 75.0f;  // handover tilt rate, see KICK
+  float coastHold_ = 0.0f;    // duty that keeps the wheel alive through COAST
 };
 
 inline bool jumpControllerSelfTest() {
@@ -238,6 +250,26 @@ inline bool jumpControllerSelfTest() {
     sc.step(150, -12, 140, 50, false);
     if (sc.step(300, -11, 30, 0, false) != -1.0f) return false; // back to KICK, duty = side_ (= -1)
     if (sc.phase() != JumpController::Phase::KICK) return false;
+  }
+
+  {
+    // COAST holds the wheel when asked to, and still stops when the angle or
+    // the rate says so. Default 0 keeps the original free-wheel behaviour.
+    JumpController hc;
+    hc.setTargetRateDps(75.0f);
+    hc.setCoastHoldDuty(0.2f);
+    hc.begin(0, -16, 100, 400, 8);
+    hc.step(0, -16, 0, 0, false);
+    hc.step(102, -16, 0, 110, true);
+    hc.step(150, -12, 140, 50, false);                 // -> COAST
+    if (hc.phase() != JumpController::Phase::COAST) return false;
+    if (hc.step(200, -10, 100, 0, false) != -0.2f) return false;   // side_ = -1
+    hc.step(240, -7, 85, 0, false);
+    if (hc.phase() != JumpController::Phase::CAPTURED) return false;
+    hc.setCoastHoldDuty(-1.0f);
+    if (hc.coastHoldDuty() != 0.0f) return false;
+    hc.setCoastHoldDuty(9.0f);
+    if (hc.coastHoldDuty() != 0.5f) return false;      // clamped
   }
 
   {
