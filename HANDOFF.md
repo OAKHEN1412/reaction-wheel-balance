@@ -23,8 +23,7 @@ mass/inertia, low-duty behavior, FG sign accuracy and reverse/braking torque
 measurements before treating these model results as hardware validation.
 
 
-อัปเดตล่าสุด: 2026-09-19 · repo: `OAKHEN1412/reaction-wheel-balance` (private)
-local path: `C:\Users\Pishe\Desktop\Projects\self-balancing-robot`
+อัปเดตล่าสุด: 2026-09-19 · repo: `OAKHEN1412/reaction-wheel-balance`
 
 ## เป้าหมายโปรเจค
 โครงตัว U ทรงตัวบนขอบฐานด้วยล้อเหวี่ยง 20 cm (reaction wheel) บนแกน X — **Arduino Mega 2560** อ่าน MPU-6050 แล้วสั่ง BLDC-3640 ขอบเขตในโครงงาน: เอียงไม่เกิน 5° บนพื้นราบ
@@ -36,7 +35,7 @@ local path: `C:\Users\Pishe\Desktop\Projects\self-balancing-robot`
 | วงจร | `hardware/wiring.md`, `hardware/schematic.svg/.png` | รีวิวแล้ว ขาตรงตามสเปก |
 | เฟิร์มแวร์ | `firmware/reaction_wheel_balance/`, `firmware/imu_test/`, `firmware/motor_test/`, `firmware/README.md` | compile ผ่านทุก sketch (รวม `sign_test`) · รีวิวและแก้ไปแล้ว 1 รอบ (8 จุด) |
 | Simulation | `sim/` (`design_gains.py --set … --quick`, `hardware_requirements.py`, `README.md`) | unittest ผ่าน 8/8 |
-| หน้าเว็บภาพรวม | `project-overview.html` + `assets/` · เผยแพร่ที่ https://claude.ai/code/artifact/0f8a08c6-c1ac-4857-b9ba-71d55fbd3f8d | v2 มีรูปโมดูลจริงและภาพ CAD แล้ว |
+| หน้าเว็บภาพรวม | `project-overview.html` + `assets/` (เผยแพร่เป็น artifact ส่วนตัว — ลิงก์อยู่กับเจ้าของโปรเจค) | v2 มีรูปโมดูลจริงและภาพ CAD แล้ว |
 
 คำสั่ง compile: `arduino-cli compile --fqbn arduino:avr:mega firmware/<sketch>` (avr core ติดตั้งอยู่แล้ว) · upload ที่ `COM3` · Python ใช้ `py -X utf8`
 
@@ -118,7 +117,7 @@ local path: `C:\Users\Pishe\Desktop\Projects\self-balancing-robot`
 - ⚠️ `config.h` ตอนนี้เป็น `JUMP_SPIN_RPM 500 / JUMP_KICK_MS 350` (ค่าเก่า) → **ต้องอัปเดตเป็น 550/450/8** หลังยืนยันความซ้ำได้ (command reject >550 rpm)
 - ⚠️ ตอนจบ session เดิม **COM3 หาย** (GetPortNames ว่าง) + serial bridge ตาย → agent ใหม่ต้องกู้ COM3 + รัน `bridge.ps1` ใหม่ก่อน (ปิด 12V ก่อน)
 - ค่า control ปัจจุบัน: Kp 1137.4, **Kd 500** (SD 0.27°), Kw 1.0, Ki 0.0387 · wheel-speed bias ค้าง ~-80 ถึง -110 rpm (แก้: เพิ่ม Kw)
-- Handoff ฉบับเต็ม: `C:\Users\Pishe\AppData\Local\Temp\handoff-7c035253-latest.md`
+- Handoff ฉบับเต็มของ session นั้นอยู่ใน scratchpad ของเครื่อง (ไม่ได้ commit)
 
 ## ปรับ jump + FG (2026-09-20, ต่อ)
 - **ห้ามใส่ R pull-up ภายนอกที่ FG:** ทดสอบแบบ A/B ด้วย `motor_test` → ใส่ 4.7k ไป 5V นับพัลส์ได้แค่ ~60/100/70 ต่อวินาทีที่ duty 300/600/900 · **ถอดออกได้ 187/421/645** (ถูกต้อง) · ใช้ INPUT_PULLUP ของ Mega อย่างเดียว
