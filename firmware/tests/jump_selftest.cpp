@@ -24,19 +24,39 @@ int main() {
   JumpController c;
   const uint32_t wrap = 0xffffff00UL;
   c.begin(wrap, -16, 100, 20, 10);
-  CHECK(c.step(wrap+2, -16, 0, 0, false) == 1);
+  // Spin-up duty scales with the requested speed and floors at kSpinDuty, so a
+  // 100 rpm request spins at 0.6, not at full duty. This expected full duty and
+  // had been failing at HEAD unnoticed -- the suite is not run often enough.
+  CHECK(c.step(wrap+2, -16, 0, 0, false) == JumpController::kSpinDuty);
   c.step(wrap+1500, -16, 0, 0, false);
   CHECK(c.phase() == JumpController::Phase::ABORTED);
   c.begin(0, 16, 100, 500, 10);
   c.step(1498, 16, 0, 100, true);
   c.step(2000, 1, -10, 100, true); // total deadline beats late capture
   CHECK(c.phase() == JumpController::Phase::ABORTED);
+  // Model speed alone never authorizes the kick: without a verified FG pulse
+  // the spin-up must hold and then abort on the 150 ms FG deadline. This used
+  // to assert ABORTED at 100 ms, which the guard cannot do, and had been
+  // failing at HEAD alongside the check above.
   c.begin(0, 16, 100, 20, 10);
-  c.step(100, 16, 0, 100, false); // model speed alone never authorizes kick
+  c.step(100, 16, 0, 100, false);
+  CHECK(c.phase() == JumpController::Phase::SPINUP);
+  c.step(160, 16, 0, 100, false);
   CHECK(c.phase() == JumpController::Phase::ABORTED);
-  c.begin(0, 16, 100, 20, 10);
-  c.step(2, 16, 0, 576, true);
+  CHECK(c.abortReason() == 8);
+  // Overspeed now needs three consecutive readings. A single FG sample is not
+  // evidence: on 2026-09-22 two launches in a batch of six were aborted here
+  // reading 719 and 806 rpm off a frame sitting still with a stopped wheel.
+  // fgVerified is false here, which is the case the guard exists for: the
+  // glitches arrive before FG has proven itself, so the kick trigger (which
+  // requires a verified FG) cannot consume them first.
+  c.begin(0, 16, 550, 20, 10);
+  c.step(2, 16, 0, 800, false);
+  CHECK(c.phase() == JumpController::Phase::SPINUP);
+  c.step(4, 16, 0, 800, false);
+  c.step(6, 16, 0, 800, false);
   CHECK(c.phase() == JumpController::Phase::ABORTED);
+  CHECK(c.abortReason() == 4);
   c.begin(0, 16, 100, 20, 10);
   c.step(2, NAN, 0, 0, false);
   CHECK(c.phase() == JumpController::Phase::ABORTED);

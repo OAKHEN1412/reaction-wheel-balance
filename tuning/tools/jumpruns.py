@@ -34,7 +34,12 @@ def parse(path):
 
 
 def runs(rows):
-    """Split into (jump_rows, following_rows) per JUMP_UP episode."""
+    """Split into (start_index, jump_rows, aftermath_rows) per JUMP_UP episode.
+
+    The aftermath stops at the next launch. Letting it run to the end of the
+    file makes every run report the same overshoot -- the largest one in the
+    whole session -- which is how this was found.
+    """
     out, cur, start = [], None, 0
     for i, r in enumerate(rows):
         if r[1] == "JUMP_UP":
@@ -42,11 +47,13 @@ def runs(rows):
                 cur, start = [], i
             cur.append(r)
         elif cur is not None:
-            out.append((start, cur, rows[i:]))
+            out.append([start, cur, i])
             cur = None
     if cur is not None:
-        out.append((start, cur, []))
-    return out
+        out.append([start, cur, len(rows)])
+    # Each aftermath ends where the next jump begins.
+    return [(s, j, rows[end:out[k + 1][0] if k + 1 < len(out) else len(rows)])
+            for k, (s, j, end) in enumerate(out)]
 
 
 def summarise(idx, jrows, after, msgs):

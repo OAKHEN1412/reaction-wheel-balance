@@ -66,7 +66,7 @@ public:
   void setTargetRateDps(float v) { vTargetDps_ = v; }
   float targetRateDps() const { return vTargetDps_; }
   void begin(uint32_t now, float thetaDeg, float rpm, uint16_t kickMs, float captureDeg) {
-    phase_ = Phase::SPINUP; start_ = phaseStart_ = now; reason_ = 0;
+    phase_ = Phase::SPINUP; start_ = phaseStart_ = now; reason_ = 0; overspeed_ = 0;
     side_ = thetaDeg > 0 ? 1 : -1;
     restAngle_ = thetaDeg; rpm_ = rpm; kickMs_ = kickMs; captureDeg_ = captureDeg;
     spinProven_ = false;
@@ -90,7 +90,14 @@ public:
       // Overspeed only matters while FG drives the spin-up. At the KICK's DIR
       // flip the FG emits a glitch (read 782 rpm on hardware 2026-09-20) and the
       // kick is open-loop anyway, so it is not checked there.
-      if (fgRpm > 575) return abort(4);
+      // The overspeed guard needs consecutive readings. A single FG sample is
+      // not evidence: on 2026-09-22 two launches in a six-launch batch were
+      // aborted here reading 719 and 806 rpm off a frame sitting still with a
+      // stopped wheel. FG_MIN_PERIOD_US only rejects glitches above ~1220 rpm,
+      // so the ones in this range reach the guard. A real overspeed persists;
+      // a glitch pulse does not.
+      overspeed_ = (fgRpm > 575) ? (uint8_t)(overspeed_ + 1) : 0;
+      if (overspeed_ >= 3) return abort(4);
       // 2026-09-19 hardware: a full-duty spin-up presses the frame into its
       // compliant stop at >10 dps, so the guards are loose enough for that.
       if (fabsf(thetaDeg-restAngle_) > 4) return abort(6);
@@ -160,6 +167,7 @@ public:
 private:
   float abort(uint8_t r) { phase_ = Phase::ABORTED; reason_ = r; return 0; }
   uint8_t reason_ = 0;
+  uint8_t overspeed_ = 0;   // consecutive FG samples above the spin-up limit
   bool spinProven_ = false;
   Phase phase_ = Phase::ABORTED;
   uint32_t start_ = 0, phaseStart_ = 0;
@@ -230,6 +238,23 @@ inline bool jumpControllerSelfTest() {
     sc.step(150, -12, 140, 50, false);
     if (sc.step(300, -11, 30, 0, false) != -1.0f) return false; // back to KICK, duty = side_ (= -1)
     if (sc.phase() != JumpController::Phase::KICK) return false;
+  }
+
+  {
+    // Overspeed guard: a lone FG glitch must not abort the spin-up, three
+    // consecutive readings must. Hardware 2026-09-22 threw 719 and 806 rpm
+    // single samples off a stopped wheel and lost two launches to them.
+    JumpController oc;
+    oc.begin(0, -16, 550, 400, 8);
+    oc.step(0, -16, 0, 0, false);
+    oc.step(10, -16, 0, 800, false);            // one glitch
+    if (oc.phase() != JumpController::Phase::SPINUP) return false;
+    oc.step(20, -16, 0, 100, false);            // sane reading clears the count
+    oc.step(30, -16, 0, 800, false);
+    oc.step(40, -16, 0, 800, false);
+    if (oc.phase() != JumpController::Phase::SPINUP) return false;
+    oc.step(50, -16, 0, 800, false);            // third in a row
+    if (oc.phase() != JumpController::Phase::ABORTED || oc.abortReason() != 4) return false;
   }
 
   JumpController c;
