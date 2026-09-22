@@ -289,3 +289,36 @@ format. `cmd_rpm` during jump is voltage-equivalent speed, not the spin target.
 Full sweep, assumptions and risks: [sim/out/jumpup/README.md](../sim/out/jumpup/README.md).
 Host-only tests: `firmware/tests/jump_selftest.cpp` (standard C++11 compiler).
 No board upload or COM3 access was made as part of this implementation.
+
+
+## แฟลชและสั่งงาน Nano ผ่าน Mega (เมื่อ CH340 บน Nano ใช้ไม่ได้) — 2026-09-23
+
+CH340 บน Nano รับข้อมูลเข้าไม่ได้ (บอร์ดส่งออกได้ แต่ upload `not in sync`, `get` เงียบ) — ลอง 5 พอร์ต 2 สาย ถอดไดรเวอร์ Blink 1 KB ก็ไม่เข้า จึงใช้ Mega 2560 เป็นทางผ่านแทน มี 2 สเก็ตช์สำหรับ Mega:
+
+| งาน | สเก็ตช์บน Mega | ใช้ bootloader ของ Nano |
+|---|---|---|
+| **แฟลช** เฟิร์มแวร์ลง Nano | `firmware/mega_isp/ArduinoISP/` (ต้นฉบับจาก arduino-examples) | ไม่ (เขียนผ่าน SPI ตรง ๆ, bootloader จะถูกลบ) |
+| **สั่งงาน/telemetry** ตอนจูน | `firmware/mega_passthrough/` | ไม่เกี่ยว |
+
+**ปิด 12V และถอด USB ของ Nano ออก** ทั้งสองแบบ — Nano รับไฟ 5V จาก Mega
+
+### A. แฟลชผ่าน Mega (ISP)
+
+1. `arduino-cli upload --fqbn arduino:avr:mega -p COM3 firmware/mega_isp/ArduinoISP`
+2. ต่อสาย (Mega → Nano):
+   `D50 (MISO) → D12` · `D51 (MOSI) → D11` · `D52 (SCK) → D13` · `D10 → RST` · `5V → 5V` · `GND → GND`
+   (ขา D11/D12/D13 ของ Nano ว่างในโปรเจคนี้ · ถ้ามี LED เพิ่มได้: D9 heartbeat, D8 error, D7 programming)
+3. ถ้า upload บอก not in sync ให้ใส่ **ตัวเก็บประจุ 10 µF ระหว่าง RESET กับ GND ของ Mega** (ขั้ว − ที่ GND) หลังจากโหลด ArduinoISP แล้ว — กัน Mega รีเซ็ตตัวเองตอน avrdude เปิดพอร์ต
+4. `arduino-cli upload --fqbn arduino:avr:nano -P arduinoasisp -p COM3 firmware/reaction_wheel_balance`
+5. ต้องการ bootloader กลับ (ไม่จำเป็น): `arduino-cli burn-bootloader --fqbn arduino:avr:nano -P arduinoasisp -p COM3`
+
+EEPROM (เกน + offset) **ไม่ถูกลบ** ตอนแฟลชผ่าน ISP ด้วย upload ปกติ (avrdude ไม่ทำ chip-erase ที่ EEPROM เพราะ EESAVE fuse ของ Nano ตั้งไว้) — ตรวจด้วย `get` หลังต่อ passthrough ถ้าหาย ตั้งใหม่: `kp 1137.4` `kd 450` `kw 3` `ki 0.0387` → `zero` → `save`
+
+### B. สั่งงานผ่าน Mega (passthrough)
+
+1. ถอดสาย SPI ออก แล้ว `arduino-cli upload --fqbn arduino:avr:mega -p COM3 firmware/mega_passthrough`
+2. ต่อสาย: `Mega TX1 (D18) → Nano D0 (RX)` · `Mega RX1 (D19) → Nano D1 (TX)` · `GND → GND` · `5V → 5V` · (เลือกได้) `Mega D2 → Nano RST`
+3. รัน `tuning/tools/bridge.ps1 -Port COM3 ...` เหมือนเดิมทุกอย่าง
+4. ส่งบรรทัด `~RESET~` ผ่าน bridge เพื่อรีเซ็ต Nano (ถ้าต่อ D2→RST ไว้) — ใช้แทน DTR
+
+การต่อ RX/TX ของ Nano ต้องถอด USB ของ Nano ออกจริง ๆ ไม่งั้น CH340 บนบอร์ดขับขา D0 ชนกับ Mega
