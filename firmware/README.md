@@ -312,7 +312,7 @@ CH340 บน Nano รับข้อมูลเข้าไม่ได้ (บ
 4. `arduino-cli upload --fqbn arduino:avr:nano -P arduinoasisp -p COM3 firmware/reaction_wheel_balance`
 5. ต้องการ bootloader กลับ (ไม่จำเป็น): `arduino-cli burn-bootloader --fqbn arduino:avr:nano -P arduinoasisp -p COM3`
 
-EEPROM (เกน + offset) **ไม่ถูกลบ** ตอนแฟลชผ่าน ISP ด้วย upload ปกติ (avrdude ไม่ทำ chip-erase ที่ EEPROM เพราะ EESAVE fuse ของ Nano ตั้งไว้) — ตรวจด้วย `get` หลังต่อ passthrough ถ้าหาย ตั้งใหม่: `kp 1137.4` `kd 450` `kw 3` `ki 0.0387` → `zero` → `save`
+**EEPROM ถูกลบ** ตอนแฟลชผ่าน ISP (avrdude ทำ chip-erase และ fuse ของ Nano ไม่ได้ตั้ง EESAVE) — ไม่เป็นไร เพราะค่าใน `config.h` เท่ากับค่าที่จูนไว้แล้ว (Kp 1137.4 / Kd 450 / Kw 3 / Ki 0.0387) เหลือแค่ตั้งศูนย์ใหม่หลังต่อ passthrough: ตั้งโครงตรง → `zero` → `save`
 
 ### B. สั่งงานผ่าน Mega (passthrough)
 
