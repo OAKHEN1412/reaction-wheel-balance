@@ -1,0 +1,10 @@
+Gate 1: from 2 deg, wheel stopped, 20 s: held=True fail='' theta_meas SD=0.59 deg gyro SD=1.19 dps period=0.92 s duty mean=0.105 max=0.22 sat1s=0.0% wheel mean=-0 [-93,81] rpm max|theta|=2.0
+Kd sweep (real: 400 -> 1.73 Hz SD 0.57, 450 -> 2.1 Hz SD 0.43, 500 -> 2.22 Hz SD 0.35, 600 -> unstable/saturated):
+  Kd 300: held=True SD=1.18 deg gyroSD=2.90 dps fast mode 1.11 Hz duty mean=0.147 max=0.28 wheel [-111,114]
+  Kd 400: held=True SD=0.69 deg gyroSD=1.42 dps fast mode 1.06 Hz duty mean=0.109 max=0.21 wheel [-85,83]
+  Kd 450: held=True SD=0.47 deg gyroSD=1.00 dps fast mode 1.06 Hz duty mean=0.091 max=0.19 wheel [-73,76]
+  Kd 500: held=True SD=0.19 deg gyroSD=0.51 dps fast mode 1.17 Hz duty mean=0.087 max=0.16 wheel [-62,-8]
+  Kd 600: held=True SD=0.15 deg gyroSD=0.39 dps fast mode 1.17 Hz duty mean=0.087 max=0.15 wheel [7,52]
+  Kd 700: held=True SD=0.22 deg gyroSD=0.47 dps fast mode 1.17 Hz duty mean=0.086 max=0.17 wheel [-66,35]
+Recovery limit, wheel stopped, zero rate (real: ~8 deg):
+  largest recovered static angle: 8 deg

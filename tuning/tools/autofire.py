@@ -48,6 +48,24 @@ def tail_rows(fh, msgs=None):
         yield None
 
 
+def echo_mismatch(params, ack):
+    """Compare the parameters sent with the ones the board echoed in its ack.
+
+    Returns '' when they agree (or the firmware predates the echo), otherwise a
+    short description of the first disagreement.
+    """
+    import re
+    got = dict(re.findall(r"(rpm|kick|cap|rate|hold)=([-\d.]+)", ack))
+    if not got:
+        return ""  # old firmware without the echo; nothing to check
+    names = ["rpm", "kick", "cap", "rate", "hold"]
+    sent = params.split()
+    for name, val in zip(names, sent):
+        if name in got and abs(float(got[name]) - float(val)) > 0.051:
+            return f"{name} sent {val} got {got[name]}"
+    return ""
+
+
 def send(cmd_path, text):
     with open(cmd_path, "w", encoding="ascii") as fh:
         fh.write(text + "\n")
@@ -60,7 +78,13 @@ def main():
     ap.add_argument("--side", choices=["+", "-"], required=True)
     ap.add_argument("--runs", type=int, default=6)
     ap.add_argument("--params", default="550 450 8 75",
-                    help="spin_rpm kick_ms capture_deg handover_rate_dps")
+                    help="spin_rpm kick_ms capture_deg handover_rate_dps [coast_hold]")
+    ap.add_argument("--params-b", default=None,
+                    help="second parameter set; launches alternate A,B,A,B... "
+                         "Interleaving matters: this machine has drifted within a "
+                         "batch before (handover rate fell with elapsed time, "
+                         "r=-0.79), and back-to-back blocks charge that drift "
+                         "entirely to whichever set ran second.")
     ap.add_argument("--max-minutes", type=float, default=15.0)
     args = ap.parse_args()
 
@@ -71,7 +95,13 @@ def main():
 
     fired = 0
     still_since = None
-    print(f"autofire: {args.runs} runs on side {args.side}, params '{args.params}'", flush=True)
+    sets = [args.params] + ([args.params_b] if args.params_b else [])
+    if len(sets) > 1:
+        print(f"autofire: {args.runs} runs on side {args.side}, alternating", flush=True)
+        for k, s in enumerate(sets):
+            print(f"  {chr(65+k)}: {s}", flush=True)
+    else:
+        print(f"autofire: {args.runs} runs on side {args.side}, params '{args.params}'", flush=True)
 
     while fired < args.runs and time.time() < deadline:
         # --- wait for a settled frame on the side we are tuning -------------
@@ -102,8 +132,11 @@ def main():
         # --- fire -----------------------------------------------------------
         fired += 1
         still_since = None
-        print(f"[{fired}/{args.runs}] jump {args.params}  (from {theta:.1f} deg)", flush=True)
-        send(args.cmd, f"jump {args.params}")
+        which = (fired - 1) % len(sets)
+        params = sets[which]
+        tag = f"{chr(65+which)} " if len(sets) > 1 else ""
+        print(f"[{fired}/{args.runs}] {tag}jump {params}  (from {theta:.1f} deg)", flush=True)
+        send(args.cmd, f"jump {params}")
 
         # --- watch for the outcome -------------------------------------------
         t_fire = time.time()
@@ -122,14 +155,32 @@ def main():
             # were logged that way on 2026-09-22 while the frame lay at 96 deg
             # and the board was refusing every command.
             if not launched:
-                if any(m.startswith("jump: SPINUP") for m in msgs):
+                ack = next((m for m in msgs if m.startswith("jump: SPINUP")), None)
+                if ack is not None:
+                    bad = echo_mismatch(params, ack)
+                    if bad:
+                        # Launched under parameters other than the ones sent:
+                        # a value garbled in transit but still within range.
+                        fired -= 1
+                        outcome = f"WRONG PARAMS ({bad}), stopping and retrying"
+                        send(args.cmd, "stop")
+                        time.sleep(1.5)
+                        break
                     launched = True
                 elif time.time() - t_fire > 2.0:
                     fired -= 1
                     outcome = ("NOT LAUNCHED, retrying -- "
                                + (msgs[-1] if msgs else "no reply from the board"))
                     break
-            if launched and any(m.startswith("jump: abort") for m in msgs):
+            if not launched:
+                # Nothing below may run until the board has said SPINUP. The
+                # frame is lying in FALLEN before every launch, so evaluating
+                # outcomes here recorded twelve refused commands as twelve
+                # falls on 2026-09-23 -- the ack check above was being
+                # bypassed, not failing.
+                time.sleep(0.05)
+                continue
+            if any(m.startswith("jump: abort") for m in msgs):
                 fired -= 1  # never got airborne; does not count against the batch
                 outcome = f"ABORTED, retrying -- {[m for m in msgs if m.startswith('jump: abort')][-1]}"
                 break

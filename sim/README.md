@@ -493,3 +493,15 @@ These are conditional predictions, not measured self-righting performance.
 The jump model is isolated from the existing `model.py`/`params.py` balance
 regressions so that the old stall-torque cap cannot silently remove plugging.
 Run all tests with `py -X utf8 -m unittest test_model`.
+
+
+## 2026-09-22: Nano-build replica (`nano_replica.py`) -- Gate 2 NOT passed
+
+`py -X utf8 sim/nano_replica.py` (from the repo root) builds a firmware-faithful
+replica identified from the Nano telemetry and validates it against the two
+launch datasets. Result: steady balancing is reproduced (amplitude, duty,
+wheel bias, 8 deg static limit; not the 2.1 Hz mode), but the model cannot
+classify the known jump-up launches -- it is wrong about fast handovers with
+a fast-spinning wheel. Read [out/nano_replica/README.md](out/nano_replica/README.md)
+before trusting anything in `out/nano_replica/`. `capture_set.py` (previous
+attempt) predicted every launch as a fall and should not be used either.

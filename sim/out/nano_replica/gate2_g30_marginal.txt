@@ -1,0 +1,28 @@
+=== Gate 2 (g30_marginal) ===
+  campaign 1 -  -6.32 deg   40.3 dps   -47.7 rpm | obs held=False sat= 31% | pred held=True  sat=  0.0% 
+  campaign 2 +   6.25 deg  -47.8 dps    28.9 rpm | obs held=False sat= 16% | pred held=True  sat=  0.0% 
+  campaign 3 -  -6.49 deg   57.0 dps   -93.6 rpm | obs held=True  sat=  0% | pred held=True  sat=  0.0% 
+  campaign 4 +   6.11 deg  -36.9 dps    72.4 rpm | obs held=True  sat=  0% | pred held=True  sat=  0.0% 
+  campaign 5 +   7.62 deg  -52.4 dps    39.1 rpm | obs held=False sat= 22% | pred held=True  sat=  0.2% 
+  campaign 6 +   6.78 deg  -40.7 dps    19.4 rpm | obs held=True  sat=  0% | pred held=True  sat=  0.0% 
+  campaign 7 +   5.71 deg  -47.0 dps   -31.4 rpm | obs held=False sat= 26% | pred held=True  sat=  2.6% 
+  campaign 8 +   7.33 deg  -44.5 dps   -23.1 rpm | obs held=False sat= 27% | pred held=True  sat=  8.4% 
+  campaign confusion: successes caught 3/3, failures caught 0/5  (FP 5, FN 0)  score 3/8
+  today  1 -  -7.30 deg   63.0 dps  -291.0 rpm | obs held=False sat= 37% | pred held=True  sat=  0.0% 
+  today  2 -  -8.00 deg   85.0 dps  -349.0 rpm | obs held=False sat= 46% | pred held=True  sat=  0.0% 
+  today  3 -  -7.80 deg   88.0 dps  -205.0 rpm | obs held=False sat= 48% | pred held=True  sat=  4.8% 
+  today  6 -  -5.30 deg   71.0 dps  -266.0 rpm | obs held=False sat= 42% | pred held=True  sat=  0.0% 
+  today  7 -  -7.40 deg   60.0 dps   -93.0 rpm | obs held=True  sat=  2% | pred held=True  sat=  1.2% 
+  today  8 -  -7.00 deg   42.0 dps   -40.0 rpm | obs held=False sat= 29% | pred held=True  sat=  0.0% 
+  today  9 -  -7.70 deg   62.0 dps    43.0 rpm | obs held=False sat= 35% | pred held=True  sat=  7.0% 
+  today 10 -  -6.40 deg   44.0 dps   -36.0 rpm | obs held=False sat= 14% | pred held=True  sat=  0.0% 
+  today 11 -  -5.50 deg   57.0 dps   -87.0 rpm | obs held=False sat=  2% | pred held=True  sat=  0.8% 
+  today 13 -  -6.30 deg   40.0 dps   -32.0 rpm | obs held=False sat= 29% | pred held=True  sat=  0.0% 
+  today 14 -  -8.70 deg   63.0 dps   -24.0 rpm | obs held=False sat= 34% | pred held=True  sat= 22.2% 
+  today 15 -  -5.70 deg   24.0 dps    -9.0 rpm | obs held=False sat= 41% | pred held=True  sat=  0.0% 
+  today 16 -  -7.80 deg   45.0 dps   -63.0 rpm | obs held=False sat= 22% | pred held=True  sat= 23.8% 
+  today 18 -  -4.90 deg   18.0 dps     6.0 rpm | obs held=False sat= 40% | pred held=True  sat=  0.0% 
+  today 19 -  -5.90 deg   43.0 dps    41.0 rpm | obs held=False sat= 38% | pred held=True  sat=  1.2% 
+  today 20 -  -5.50 deg   17.0 dps     1.0 rpm | obs held=False sat= 41% | pred held=True  sat=  0.0% 
+  today 22 -  -4.90 deg   20.0 dps   -10.0 rpm | obs held=False sat= 33% | pred held=True  sat=  0.0% 
+  today confusion: successes caught 1/1, failures caught 0/16  (FP 16, FN 0)  score 1/17

@@ -1,0 +1,22 @@
+=== launch parameter scan from -17 deg (kick 450 ms), ranked by survivable g_eff ===
+  g_crit  36.6: jump 550 450 8 40 -> handover -8.2 deg 32.0 dps wheel -34.0 rpm at 812 ms 
+  g_crit  36.6: jump 550 450 10 40 -> handover -9.3 deg 41.0 dps wheel -41.0 rpm at 782 ms 
+  g_crit  35.9: jump 550 450 5 40 -> handover -4.0 deg 46.0 dps wheel -201.0 rpm at 942 ms 
+  g_crit  35.3: jump 550 450 5 50 -> handover -4.5 deg 52.0 dps wheel -154.0 rpm at 854 ms 
+  g_crit  35.3: jump 550 450 8 50 -> handover -6.2 deg 62.0 dps wheel -179.0 rpm at 824 ms 
+  g_crit  35.3: jump 550 450 10 50 -> handover -8.2 deg 63.0 dps wheel -153.0 rpm at 794 ms 
+  g_crit  34.7: jump 550 450 5 55 -> handover -3.7 deg 64.0 dps wheel -209.0 rpm at 860 ms 
+  g_crit  34.7: jump 550 450 5 60 -> handover -3.0 deg 76.0 dps wheel -270.0 rpm at 868 ms 
+  g_crit  34.7: jump 550 450 8 55 -> handover -6.2 deg 68.0 dps wheel -205.0 rpm at 824 ms 
+  g_crit  34.7: jump 550 450 8 60 -> handover -6.2 deg 68.0 dps wheel -205.0 rpm at 824 ms 
+  g_crit  34.7: jump 550 450 10 55 -> handover -8.2 deg 63.0 dps wheel -153.0 rpm at 794 ms 
+  g_crit  34.7: jump 550 450 10 60 -> handover -8.2 deg 63.0 dps wheel -153.0 rpm at 794 ms 
+  g_crit  34.1: jump 550 450 5 65 -> handover -3.0 deg 76.0 dps wheel -270.0 rpm at 868 ms 
+  g_crit  34.1: jump 550 450 8 65 -> handover -6.2 deg 68.0 dps wheel -205.0 rpm at 824 ms 
+  g_crit  34.1: jump 550 450 10 65 -> handover -8.2 deg 63.0 dps wheel -153.0 rpm at 794 ms 
+  g_crit  33.4: jump 550 450 5 75 -> handover -3.0 deg 76.0 dps wheel -270.0 rpm at 868 ms 
+  g_crit  33.4: jump 550 450 8 75 -> handover -6.2 deg 68.0 dps wheel -205.0 rpm at 824 ms 
+  g_crit  33.4: jump 550 450 10 75 -> handover -8.2 deg 63.0 dps wheel -153.0 rpm at 794 ms 
+  g_crit  32.2: jump 550 450 5 90 -> handover -3.0 deg 76.0 dps wheel -270.0 rpm at 868 ms 
+  g_crit  32.2: jump 550 450 8 90 -> handover -3.0 deg 76.0 dps wheel -270.0 rpm at 868 ms 
+  current default (550 450 8 75): g_crit 33.4, handover -6.2 deg 68.0 dps -205.0 rpm

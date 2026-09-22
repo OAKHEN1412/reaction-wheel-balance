@@ -244,7 +244,21 @@ JumpDenial startJump(float rpm, uint16_t kick, float capture, float targetRate) 
 void printJumpDenial(JumpDenial d) {
   switch (d) {
     case JumpDenial::None:
-      Serial.println(F("jump: SPINUP then reverse-voltage KICK"));
+      // Echo the parameters the board actually parsed. Motor noise corrupts
+      // inbound serial around launches (2026-09-23: a batch of 28 commands
+      // got 16 acks, one "unknown command" and one "invalid args"); a value
+      // that is garbled but still valid would otherwise launch silently
+      // under the wrong parameters and be recorded as an honest attempt.
+      Serial.print(F("jump: SPINUP then reverse-voltage KICK rpm="));
+      Serial.print(jumpSpinRpm, 0);
+      Serial.print(F(" kick="));
+      Serial.print(jumpKickMs);
+      Serial.print(F(" cap="));
+      Serial.print(jumpCaptureDeg, 1);
+      Serial.print(F(" rate="));
+      Serial.print(jumpTargetRateDps, 1);
+      Serial.print(F(" hold="));
+      Serial.println(jumpCoastHoldDuty, 2);
       break;
     case JumpDenial::Disabled:
       Serial.println(F("jump: disabled or not in voltage mode"));
