@@ -8,3 +8,10 @@ build/
 .vscode/
 .DS_Store
 Thumbs.db
+
+# Thesis output: only report/_source (build scripts) and report/README.md are tracked.
+# The Word/PDF files carry names and personal details, and this repo is public.
+report/Word/
+report/PDF/
+report/รูป/
+report/_ต้นฉบับเก่า/
