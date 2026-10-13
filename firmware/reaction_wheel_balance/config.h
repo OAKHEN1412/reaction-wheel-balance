@@ -152,8 +152,18 @@
 // IMU axis selection -- CONFIRMED 2026-09-19 on the new MPU-6050 with
 // tools/imu_viewer.html (hand tilt: d(theta) +9.4 deg, rate correlation 0.74).
 // Balance axis = sensor X: roll from atan2(ay, az), rate from gx, both +1
-// (consistent with the right-hand rule). Re-run firmware/imu_test if the
-// module is ever remounted.
+// (consistent with the right-hand rule).
+// RE-CONFIRMED 2026-10-13 after the module went back to this position:
+// firmware/imu_test rate correlation +0.79, and firmware/sign_test gave
+// +omega -> dtheta -4.71 deg, -omega -> +4.27 deg (control sign +1).
+// The 2026-10-13 trial position in between (atan2(ax, az), gyro Y) made the
+// gyro clip at +-500 dps during balancing (`get` diag: gyro_sat 203,
+// gyro_jumps 774 in ~9 s, imu_fail 0) and the wheel chattered full
+// forward/reverse -- don't move the module there again.
+// Re-run firmware/imu_test AND firmware/sign_test if the module is remounted:
+// if sign_test then asks for -1, flip BOTH signs below rather than
+// DEFAULT_CONTROL_SIGN (that sign also multiplies Kw*omega, and jump-up
+// refuses to run unless it is +1).
 //
 // Tilt angle theta is computed as:
 //   theta_raw = IMU_ACCEL_ANGLE_SIGN * atan2(accel[IMU_ACCEL_AXIS_NUM], accel[IMU_ACCEL_AXIS_DEN])
@@ -249,6 +259,7 @@
 #define DEFAULT_KI                 0.0387f
 #define DEFAULT_CONTROL_SIGN       1.0f   // MEASURED +1 (2026-09-19, firmware/sign_test): +omega spin-up kicks
                                            // the frame to -theta (-10.3 deg), -omega to +theta (+7.0 deg).
+                                           // Re-measured +1 on 2026-10-13 (-4.71 / +4.27 deg).
                                            // Was: flip if hardware reaction torque sign is opposite
                                            // of the assumed convention (see balance_controller.h). Determine
                                            // empirically: if enabling BALANCING makes the fall visibly worse

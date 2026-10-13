@@ -31,7 +31,11 @@
 #include <Wire.h>
 
 // --- mirror of config.h --------------------------------------------------------
-static const uint8_t PIN_PWM = 11;     // PIN_MOTOR_PWM (Timer1 OC1A)
+#if defined(__AVR_ATmega2560__)
+static const uint8_t PIN_PWM = 11;     // PIN_MOTOR_PWM (Timer1 OC1A on the Mega)
+#else
+static const uint8_t PIN_PWM = 9;      // PIN_MOTOR_PWM (Timer1 OC1A on the Nano)
+#endif
 static const uint8_t PIN_DIR = 7;      // PIN_MOTOR_DIR
 static const uint8_t PIN_BRAKE = 6;    // PIN_MOTOR_BRAKE
 static const bool PWM_INVERT = true;
